@@ -36,19 +36,42 @@ jobs:
         id: key
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > "$RUNNER_TEMP/ks.p12"
-            echo "file=$RUNNER_TEMP/ks.p12" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::ANDROID_KEYSTORE secret is not set. Building an unsigned test build only; no APK is published."
+          if [ -z "$KS" ] && [ -z "$KS_PASS" ]; then
+            echo "::warning::Signing secrets are not set. Building an unsigned test build only; no APK is published."
+            exit 0
           fi
+          # Secrets pasted on a phone often pick up line breaks or the label text around the value.
+          # Keep only the long run of base64 characters, which is the key itself.
+          key() { printf '%s' "$1" | tr -d '[:space:]' | grep -oE '[A-Za-z0-9+/]{1000,}={0,2}' | head -1 || true; }
+          B64=$(key "$KS"); PW="$KS_PASS"
+          if [ -z "$B64" ] && [ -n "$(key "$KS_PASS")" ]; then
+            echo "::warning::The two secrets are the wrong way round. Using them swapped."
+            B64=$(key "$KS_PASS"); PW="$KS"
+          fi
+          if [ -z "$B64" ]; then
+            echo "::error::ANDROID_KEYSTORE does not contain the long key line (it is ${#KS} characters; expect about 3,500)."
+            exit 1
+          fi
+          PW=$(printf '%s' "$PW" | tr -d '[:space:]')
+          echo "::add-mask::$PW"
+          if ! printf '%s' "$B64" | base64 -d > "$RUNNER_TEMP/ks.p12" 2>/dev/null; then
+            echo "::error::ANDROID_KEYSTORE is cut off or damaged (${#B64} key characters found; expect about 3,500). Paste the whole long line again."
+            exit 1
+          fi
+          if ! keytool -list -keystore "$RUNNER_TEMP/ks.p12" -storetype PKCS12 -storepass "$PW" -alias timesheet > /dev/null 2>&1; then
+            echo "::error::The key was read (${#B64} characters) but ANDROID_KEYSTORE_PASSWORD does not open it (it is ${#PW} characters; expect 32), or the key is incomplete."
+            exit 1
+          fi
+          echo "Signing key and password are good."
+          echo "file=$RUNNER_TEMP/ks.p12" >> "$GITHUB_OUTPUT"
+          echo "KS_PASS=$PW" >> "$GITHUB_ENV"
 
       - name: Build
         working-directory: android
         env:
           KS_FILE: ${{ steps.key.outputs.file }}
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           # Set a SITE_URL repository variable only if the site is not at the standard Pages address.
           SITE_URL: ${{ vars.SITE_URL || format('https://{0}.github.io/{1}/', github.repository_owner, github.event.repository.name) }}
         run: |
