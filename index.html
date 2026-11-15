@@ -72,6 +72,8 @@ button:disabled{opacity:.4}
 .st.paid{background:var(--go)}.st.draft{background:#e08a00}.st.sent{background:var(--stop)}
 .item.paid{box-shadow:inset 4px 0 var(--go);padding-left:10px}.item.draft{box-shadow:inset 4px 0 #e08a00;padding-left:10px}.item.sent{box-shadow:inset 4px 0 var(--stop);padding-left:10px}
 button.big.brk{background:var(--acc);color:var(--accink)}
+a.btn{display:block;text-align:center;text-decoration:none;color:inherit;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:11px 14px;margin-bottom:8px}
+a.btn.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
 #toast{position:fixed;left:12px;right:12px;bottom:calc(80px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:12px 14px;border-radius:10px;z-index:9;display:none}
 </style>
 </head>
@@ -80,7 +82,7 @@ button.big.brk{background:var(--acc);color:var(--accink)}
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.6';
+const VER='1.7';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -221,6 +223,9 @@ function mkInv(){
 function readIV(){const g=i=>$(i).value;
  Object.assign(IV,{num:g('#in'),status:g('#is'),date:g('#id'),due:g('#iu'),client:g('#ic'),email:g('#ie'),addr:g('#ia'),tax:parseFloat(g('#it'))||0,notes:g('#inn'),pics:$('#ip').checked});
  document.querySelectorAll('[data-i]').forEach(el=>{const i=IV.items[el.dataset.i],k=el.dataset.k;i[k]=k==='d'?el.value:(parseFloat(el.value)||0)})}
+// Saves IV (a working copy) into the invoice list; a new invoice also claims its entries and number.
+function commitIV(){if(IV.isNew){delete IV.isNew;S.entries.forEach(e=>{if(IV.eids.includes(e.id))e.inv=IV.id});S.biz.next++;S.invoices.push(JSON.parse(JSON.stringify(IV)))}
+ else S.invoices[S.invoices.findIndex(i=>i.id===IV.id)]=JSON.parse(JSON.stringify(IV));save()}
 function invM(){const T=tot(IV);
  openM(`<h3>${IV.isNew?'New invoice':'Invoice '+esc(IV.num)}</h3>
  <div class="row"><label>Number<input id="in" value="${esc(IV.num)}"></label><label>Status<select id="is">${['draft','sent','paid'].map(x=>`<option ${IV.status===x?'selected':''}>${x}</option>`).join('')}</select></label></div>
@@ -232,7 +237,7 @@ function invM(){const T=tot(IV);
  <label>Tax (%)<input type="number" step="0.01" id="it" value="${IV.tax}"></label><label>Notes / payment details<textarea id="inn" rows="3">${esc(IV.notes)}</textarea></label>
  <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="ip" style="width:auto;margin:0" ${IV.pics?'checked':''}>Add work photos to the PDF (${S.entries.filter(e=>(IV.eids||[]).includes(e.id)).reduce((a,e)=>a+(e.photos||[]).length,0)} available)</label><div class="between"><b>Total</b><b>${money(T.g)}</b></div>
  <div class="row" style="margin-top:12px"><button data-a="close">Close</button><button class="pri" data-a="ivSave">Save</button></div>
- <div class="row" style="margin-top:8px"><button data-a="ivShare">Share / email PDF</button><button data-a="ivPdf">Download PDF</button></div>
+ <button data-a="ivPdf" style="width:100%;margin-top:8px">PDF: save, share or email</button>
  ${IV.isNew?'':'<button class="danger" data-a="ivDelete" style="width:100%;margin-top:8px">Delete invoice</button>'}`)}
 const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('ts_photos',1);r.onupgradeneeded=()=>r.result.createObjectStore('p');r.onsuccess=()=>ok(r.result);r.onerror=no});
 const pPut=async(k,v)=>{const d=await idb();return new Promise((ok,no)=>{const t=d.transaction('p','readwrite');t.objectStore('p').put(v,k);t.oncomplete=ok;t.onerror=no})};
@@ -380,7 +385,20 @@ function csv(list){
  [...list].sort((a,b)=>a.start-b.start).forEach(e=>{const c=C[e.id],j=jobOf(e.jobId);
   rows.push([dayKey(e.start),j?j.name:'',tStr(e.start),tStr(e.end),e.brk||0,(c.m/60).toFixed(2),(c.r/60).toFixed(2),(c.o/60).toFixed(2),c.pay.toFixed(2),e.note||''])});
  return rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n')}
-function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),3000)}
+// Installed (home screen) apps on some phones can't save files from script, so there the user taps a real link instead.
+const SA=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+let FU=null,FM=null;
+function fileM(name,blob,o={}){
+ if(FU)URL.revokeObjectURL(FU);FU=URL.createObjectURL(blob);
+ const f=new File([blob],name,{type:blob.type}),sh=!!(navigator.canShare&&navigator.canShare({files:[f]}));FM={f,title:o.title||name,txt:o.txt||''};
+ openM(`<h3>${esc(o.head||'File ready')}</h3><div class="muted" style="margin-bottom:12px">${esc(name)}</div>
+ ${sh?'<button class="pri" data-a="fShare" style="width:100%;margin-bottom:8px">Share…</button>':''}
+ <a class="btn ${sh?'':'pri'}" href="${FU}" download="${esc(name)}">Save to device</a>
+ ${o.mail?`<a class="btn" href="${esc(o.mail)}">Open email app</a><div class="muted" style="margin-bottom:8px">Email apps can't pick up the file by themselves. Save it first, then attach it to the email.</div>`:''}
+ ${SA()&&o.open?`<a class="btn" href="${esc(o.open)}" target="_blank" rel="noopener">Open in browser instead</a><div class="muted">If saving does nothing or shows a blank page, this phone doesn't let installed apps save files. Open in your browser and save from there.</div>`:''}
+ <button data-a="${o.back?'fBack':'close'}" style="width:100%;margin-top:8px">${o.back?'Back to invoice':'Close'}</button>`)}
+function dl(name,text,type){const b=text instanceof Blob?text:new Blob([text],{type});if(SA()){fileM(name,b,{open:'?tab='+tab});return}
+ const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),3000)}
 
 /* ---------- actions ---------- */
 const A={
@@ -391,14 +409,15 @@ const A={
  clrF(){F={job:'',tag:'',from:'',to:'',q:'',st:'all'};render()},csvF(){dl('timesheet-filtered.csv',csv(filt()),'text/csv')},mkInv(){mkInv()},
  openI(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));invM()},
  ivAdd(){readIV();IV.items.push({d:'',q:1,r:0});invM()},ivDel(v){readIV();IV.items.splice(+v,1);invM()},
- ivSave(){readIV();if(IV.isNew){delete IV.isNew;S.invoices.push(IV);S.entries.forEach(e=>{if(IV.eids.includes(e.id))e.inv=IV.id});S.biz.next++}
-  else S.invoices[S.invoices.findIndex(i=>i.id===IV.id)]=IV;save();closeM();render()},
+ ivSave(){readIV();commitIV();closeM();render()},
+ fShare(){navigator.share({files:[FM.f],title:FM.title,text:FM.txt}).catch(e=>{if(e.name!=='AbortError')say('Sharing failed. Use Save to device instead.')})},
+ fBack(){invM()},
  ivDelete(){const id=IV.id;ask('Delete this invoice? Its entries become uninvoiced.','Delete',()=>{S.entries.forEach(e=>{if(e.inv===id)delete e.inv});S.invoices=S.invoices.filter(i=>i.id!==id);save();render()})},
- async ivPdf(){try{const b=await makePdf();dl('Invoice-'+IV.num+'.pdf',b,'application/pdf')}catch(e){say('The PDF tool loads from the internet. Check your connection and try again.')}},
- async ivShare(){try{const b=await makePdf(),f=new File([b],'Invoice-'+IV.num+'.pdf',{type:'application/pdf'}),txt='Invoice '+IV.num+' from '+(S.biz.name||'me')+': '+money(tot(IV).g)+', due '+IV.due+'.';
-  if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f],title:'Invoice '+IV.num,text:txt});
-  else{dl(f.name,f,'application/pdf');location.href='mailto:'+IV.email+'?subject='+encodeURIComponent('Invoice '+IV.num)+'&body='+encodeURIComponent(txt+'\n\nAttach the downloaded PDF.')}
- }catch(e){if(!e||e.name!=='AbortError')say('Could not create the PDF. It needs an internet connection the first time.')}},
+ async ivPdf(){let b;try{say('Making the PDF…');b=await makePdf()}catch(e){say('Could not make the PDF. The PDF tool needs an internet connection the first time.');return}
+  const wasNew=IV.isNew;commitIV();render();if(wasNew)say('Invoice saved as '+IV.num+'.');
+  const txt='Invoice '+IV.num+' from '+(S.biz.name||'me')+': '+money(tot(IV).g)+', due '+IV.due+'.';
+  fileM('Invoice-'+IV.num+'.pdf',b,{head:'Invoice '+IV.num+' is ready',title:'Invoice '+IV.num,txt,back:1,open:'?inv='+IV.id,
+   mail:'mailto:'+encodeURI(IV.email||'')+'?subject='+encodeURIComponent('Invoice '+IV.num)+'&body='+encodeURIComponent(txt+'\n\nThe invoice PDF is attached.')})},
  day(v){dayM(v)},addD(v){entryM(null,v)},calPrev(){cOff--;render()},calNext(){cOff++;render()},calNow(){cOff=0;render()},editE(v){entryM(v)},close(){closeM()},
  saveE(v){const s=new Date($('#ms').value).getTime(),e=new Date($('#me').value).getTime();
   if(!s||!e||e<=s){say('End time must be after start time.');return}
@@ -435,7 +454,11 @@ document.addEventListener('change',ev=>{
 const fl=t=>{F[t.dataset.f]=t.value;const r=$('#res');if(r)r.innerHTML=resHtml()};
 document.addEventListener('input',ev=>{if(ev.target.dataset.f)fl(ev.target)});
 setInterval(()=>{const c=$('#clock');if(c&&S.running)c.textContent=hms(workMs(S.running))},1000);
-render();
+// "Open in browser" links land here: ?inv=<id> reopens that invoice, ?tab=<name> picks a tab.
+const QP=new URLSearchParams(location.search),qi=QP.get('inv'),qt=QP.get('tab');
+if(TABS.some(t=>t[0]===qt))tab=qt;if(qi&&S.invoices.some(i=>i.id===qi))tab='inv';
+if(location.search)history.replaceState(null,'',location.pathname);
+render();if(tab==='inv'&&qi&&S.invoices.some(i=>i.id===qi))A.openI(qi);
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 </script>
 </body>
