@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f2a900">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Timesheet</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B1%3C/text%3E%3C/svg%3E">
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#1b2530;--mute:#657281;--line:#d9dee4;--acc:#f2a900;--accink:#1b2530;--go:#1f8f5f;--stop:#c93b3b}
+@media(prefers-color-scheme:dark){:root{--bg:#11161c;--card:#1a222b;--ink:#e8edf2;--mute:#8d9aa8;--line:#2a3541;--acc:#f2b51f;--accink:#11161c;--go:#35b97f;--stop:#e4605f}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+#main{flex:1;overflow-y:auto;padding:14px 14px 90px;max-width:640px;width:100%;margin:0 auto}
+h2{font-size:22px;margin:4px 0 12px}
+h3{margin:0 0 10px;font-size:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.center{text-align:center}
+.muted{color:var(--mute);font-size:14px}
+.clock{font-size:56px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-1px;margin:6px 0}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+input,select,button{font:inherit;color:inherit}
+input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);margin:4px 0 10px}
+label{display:block;font-size:14px;color:var(--mute)}
+button{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:11px 14px;cursor:pointer}
+button.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);font-weight:600}
+button.danger{color:var(--stop)}
+button.big{width:100%;padding:18px;font-size:20px;font-weight:700;border:0;color:#fff;border-radius:14px}
+button.go{background:var(--go)}button.stop{background:var(--stop)}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.item{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-top:1px solid var(--line);cursor:pointer}
+.item:first-of-type{border-top:0}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.right{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dayh{display:flex;justify-content:space-between;font-weight:600;margin:14px 2px 6px}
+.bars{display:flex;align-items:flex-end;gap:2px;height:90px;margin-top:8px}
+.bars div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;font-size:9px;color:var(--mute)}
+.bars i{display:block;width:100%;background:var(--acc);border-radius:3px 3px 0 0;min-height:1px}
+#nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+#nav button{flex:1;border:0;border-radius:0;background:none;font-size:12px;color:var(--mute);padding:9px 0}
+#nav button span{display:block;font-size:20px}
+#nav button.on{color:var(--ink);font-weight:700;box-shadow:inset 0 3px var(--acc)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center;z-index:5}
+#modal.open{display:flex}
+#sheet{background:var(--card);width:100%;max-width:640px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:90%;overflow-y:auto}
+.fab{position:fixed;right:18px;bottom:calc(76px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;background:var(--acc);color:var(--accink);font-size:30px;border:0;padding:0;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+
+.cmh{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.cw{display:grid;grid-template-columns:repeat(7,1fr) 58px;gap:3px;margin-bottom:3px}
+.chd{font-size:12px;color:var(--mute);text-align:center}
+.cd{min-height:56px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 2px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;cursor:pointer;overflow:hidden}
+.cd span{font-size:10px;color:var(--mute);align-self:flex-start;padding-left:3px}
+.cd b{font-size:12px;font-variant-numeric:tabular-nums}
+.cd u{display:flex;gap:2px;min-height:6px;text-decoration:none}
+.cd i{width:6px;height:6px;border-radius:50%}
+.cd.out{opacity:.45}
+.cd.today{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.wt{background:var(--acc);color:var(--accink);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
+.wt b{font-size:14px}.wt span{font-size:11px}
+.tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:1px 8px;font-size:12px;margin:2px 4px 0 0;color:var(--mute)}
+#nav button{font-size:11px}textarea{font:inherit;resize:vertical}
+button:disabled{opacity:.4}
+.phs{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px}.ph{position:relative;width:76px;height:76px}
+.ph img{width:100%;height:100%;object-fit:cover;border-radius:8px}.ph button{position:absolute;top:2px;right:2px;padding:0 6px;border-radius:99px;font-size:12px}
+.st{display:inline-block;border-radius:99px;padding:1px 9px;font-size:12px;font-weight:600;color:#fff}
+.st.paid{background:var(--go)}.st.draft{background:#e08a00}.st.sent{background:var(--stop)}
+.item.paid{box-shadow:inset 4px 0 var(--go);padding-left:10px}.item.draft{box-shadow:inset 4px 0 #e08a00;padding-left:10px}.item.sent{box-shadow:inset 4px 0 var(--stop);padding-left:10px}
+button.big.brk{background:var(--acc);color:var(--accink)}
+</style>
+</head>
+<body>
+<div id="main"></div>
+<div id="modal"><div id="sheet"></div></div>
+<nav id="nav"></nav>
+<script>
+const VER='1.4';
+const KEY='timesheet_v1';
+const $=s=>document.querySelector(s);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const p2=n=>String(n).padStart(2,'0');
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function def(){return{jobs:[{id:uid(),name:'General',rate:0,color:'#f2a900'}],entries:[],running:null,lastJob:null,invoices:[],biz:{name:'',info:'',pay:'',prefix:'INV-',next:1,terms:14,tax:0},
+ settings:{round:0,otDaily:0,otWeekly:0,otMult:1.5,weekStart:1,cur:'$',period:'weekly',anchor:'2024-01-01'}}}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.jobs&&d.entries){const b=def();return Object.assign(b,d,{settings:Object.assign(b.settings,d.settings)})}}catch(e){}return def()}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+let S=load(),tab='timer',off=0,cOff=0,IV=null,EP=[],curE=null,F={job:'',tag:'',from:'',to:'',q:'',st:'all'};
+
+/* ---------- helpers ---------- */
+const dayKey=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
+const toLocal=ms=>{const d=new Date(ms);return dayKey(ms)+'T'+p2(d.getHours())+':'+p2(d.getMinutes())};
+const tStr=ms=>new Date(ms).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+const dStr=ms=>new Date(ms).toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
+const hm=m=>{m=Math.round(m);return Math.floor(m/60)+':'+p2(m%60)};
+const hms=ms=>{const s=Math.floor(ms/1000);return p2(Math.floor(s/3600))+':'+p2(Math.floor(s%3600/60))+':'+p2(s%60)};
+const money=v=>S.settings.cur+v.toFixed(2);
+const jobOf=id=>S.jobs.find(j=>j.id===id);
+function wkStart(ms){const d=new Date(ms);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()-S.settings.weekStart+7)%7));return d}
+
+/* ---------- calculations ---------- */
+function mins(e){let m=(e.end-e.start)/60000-(e.brk||0);const r=S.settings.round;if(r>0)m=Math.round(m/r)*r;return Math.max(0,m)}
+// Splits every entry into regular/overtime minutes using daily + weekly rules, and prices it.
+function calc(list){
+ const st=S.settings,dl=st.otDaily*60,wl=st.otWeekly*60,out={},day={},wk={};
+ [...list].sort((a,b)=>a.start-b.start).forEach(e=>{
+  const m=mins(e),dk=dayKey(e.start),wk0=+wkStart(e.start);
+  let r=m,o=0;
+  if(dl>0){r=Math.min(m,Math.max(0,dl-(day[dk]||0)));o=m-r}
+  day[dk]=(day[dk]||0)+m;
+  if(wl>0){const r2=Math.min(r,Math.max(0,wl-(wk[wk0]||0)));o+=r-r2;r=r2}
+  wk[wk0]=(wk[wk0]||0)+r;
+  const j=jobOf(e.jobId),rate=j?j.rate:0;
+  out[e.id]={m,r,o,pay:r/60*rate+o/60*rate*st.otMult};
+ });return out}
+function sum(list,C){return list.reduce((t,e)=>{const c=C[e.id];t.m+=c.m;t.r+=c.r;t.o+=c.o;t.pay+=c.pay;return t},{m:0,r:0,o:0,pay:0})}
+
+function range(o){
+ const st=S.settings,now=new Date();now.setHours(0,0,0,0);let a,b;
+ if(st.period==='weekly'){a=wkStart(Date.now());a.setDate(a.getDate()+7*o);b=new Date(a);b.setDate(b.getDate()+7)}
+ else if(st.period==='biweekly'){const an=new Date(st.anchor+'T00:00');an.setHours(0,0,0,0);
+  const k=Math.floor(Math.round((now-an)/864e5)/14)+o;a=new Date(an);a.setDate(a.getDate()+14*k);b=new Date(a);b.setDate(b.getDate()+14)}
+ else if(st.period==='semimonthly'){const i=now.getMonth()*2+(now.getDate()>15?1:0)+o,mm=Math.floor(i/2),h=((i%2)+2)%2;
+  a=new Date(now.getFullYear(),mm,h?16:1);b=h?new Date(now.getFullYear(),mm+1,1):new Date(now.getFullYear(),mm,16)}
+ else{a=new Date(now.getFullYear(),now.getMonth()+o,1);b=new Date(now.getFullYear(),now.getMonth()+o+1,1)}
+ return[a.getTime(),b.getTime()]}
+const rLabel=r=>{const f=x=>new Date(x).toLocaleDateString([],{month:'short',day:'numeric'});return f(r[0])+' – '+f(r[1]-864e5)};
+
+/* ---------- views ---------- */
+const TABS=[['timer','Timer','⏱'],['cal','Calendar','📅'],['log','Log','☰'],['inv','Invoices','🧾'],['sum','Summary','📊'],['set','Settings','⚙']];
+function render(){
+ $('#nav').innerHTML=TABS.map(t=>`<button data-a="tab" data-v="${t[0]}" class="${tab===t[0]?'on':''}"><span>${t[2]}</span>${t[1]}</button>`).join('');
+ $('#main').innerHTML=({timer:vTimer,cal:vCal,log:vLog,inv:vInv,sum:vSum,set:vSet})[tab]();
+}
+const jobOpts=sel=>S.jobs.map(j=>`<option value="${j.id}" ${j.id===sel?'selected':''}>${esc(j.name)}</option>`).join('');
+
+const workMs=r=>(r.brkStart||Date.now())-r.start-r.brkMs;
+function vTimer(){
+ const r=S.running,j=r&&jobOf(r.jobId),C=calc(S.entries),t0=new Date();t0.setHours(0,0,0,0);
+ const td=sum(S.entries.filter(e=>e.start>=+t0),C),wk=sum(S.entries.filter(e=>e.start>=+wkStart(Date.now())),C);
+ return`<h2>Timesheet</h2>
+ <div class="card center"><div class="clock" id="clock">${r?hms(workMs(r)):'00:00:00'}</div>
+ ${r?`<div class="muted" style="margin-bottom:10px"><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'')}, started ${tStr(r.start)}${r.brkStart?' · on break since '+tStr(r.brkStart):r.brkMs?' · '+Math.round(r.brkMs/60000)+'m break so far':''}</div>`
+ :`<select id="tj">${jobOpts(S.lastJob)}</select>`}
+ 
+ ${r?`<button class="big brk" data-a="brk" style="margin-bottom:10px">${r.brkStart?'Resume work':'Take a break'}</button><button class="big stop" data-a="stop">Stop</button>`:`<button class="big go" data-a="start">Start</button>`}</div>
+ <div class="stats"><div class="card stat"><span class="muted">Today</span><b>${hm(td.m)}</b><span class="muted">${money(td.pay)}</span></div>
+ <div class="card stat"><span class="muted">This week</span><b>${hm(wk.m)}</b><span class="muted">${money(wk.pay)}</span></div></div>`}
+
+function vCal(){
+ const C=calc(S.entries),now=new Date(),ref=new Date(now.getFullYear(),now.getMonth()+cOff,1);
+ const mo=ref.getMonth(),last=new Date(ref.getFullYear(),mo+1,0),today=dayKey(Date.now());
+ const byDay={};S.entries.forEach(e=>(byDay[dayKey(e.start)]=byDay[dayKey(e.start)]||[]).push(e));
+ const wd=[0,1,2,3,4,5,6].map(i=>['S','M','T','W','T','F','S'][(S.settings.weekStart+i)%7]);
+ const mR=v=>S.settings.cur+Math.round(v);
+ let rows='',d=wkStart(+ref),mt={m:0,pay:0};
+ while(d<=last){
+  let cells='';const wm=[];
+  for(let i=0;i<7;i++){
+   const k=dayKey(+d),L=byDay[k]||[],t=sum(L,C),inM=d.getMonth()===mo;
+   wm.push(...L);
+   if(inM){mt.m+=t.m;mt.pay+=t.pay}
+   const dots=[...new Set(L.map(e=>e.jobId))].slice(0,4).map(id=>`<i style="background:${jobOf(id)?jobOf(id).color:'#999'}"></i>`).join('');
+   cells+=`<div class="cd ${inM?'':'out'} ${k===today?'today':''}" data-a="day" data-v="${k}"><span>${d.getDate()}</span><b>${t.m?hm(t.m):''}</b><u>${dots}</u></div>`;
+   d.setDate(d.getDate()+1);
+  }
+  const w=sum(wm,C);
+  rows+=`<div class="cw">${cells}<div class="wt"><b>${w.m?hm(w.m):'–'}</b><span>${w.m?mR(w.pay):''}</span></div></div>`;
+ }
+ return`<h2>Calendar</h2>
+ <div class="cmh"><button data-a="calPrev">‹</button><b>${ref.toLocaleDateString([],{month:'long',year:'numeric'})}</b><button data-a="calNext">›</button></div>
+ <div class="cw">${wd.map(x=>`<div class="chd">${x}</div>`).join('')}<div class="chd">Week</div></div>${rows}
+ <div class="stats" style="margin-top:12px"><div class="card stat"><span class="muted">Month hours</span><b>${hm(mt.m)}</b></div><div class="card stat"><span class="muted">Month earnings</span><b>${money(mt.pay)}</b></div></div>
+ ${cOff?'<button style="width:100%" data-a="calNow">Back to this month</button>':''}
+ <p class="muted center">Tap a day to see or add entries. Week totals include days from neighboring months.</p>`}
+
+const parseTags=x=>[...new Set(String(x).split(/[,\s]+/).map(t=>t.replace(/^#/,'').toLowerCase()).filter(Boolean))];
+const allTags=()=>[...new Set(S.entries.flatMap(e=>e.tags||[]))].sort();
+const tagChips=t=>allTags().map(x=>`<span class="tag" data-a="addTag" data-v="${esc(x)}" data-t="${t}">#${esc(x)}</span>`).join('');
+function filt(){const q=F.q.toLowerCase();return S.entries.filter(e=>{const j=jobOf(e.jobId),k=dayKey(e.start);
+ return(!F.job||e.jobId===F.job)&&(!F.tag||(e.tags||[]).includes(F.tag))&&(!F.from||k>=F.from)&&(!F.to||k<=F.to)&&(F.st==='all'||(F.st==='open')===!e.inv)&&
+ (!q||((e.note||'')+' '+(j?j.name+' '+(j.client||''):'')+' '+(e.tags||[]).join(' ')).toLowerCase().includes(q))}).sort((a,b)=>b.start-a.start)}
+function resHtml(){const L=filt(),C=calc(S.entries),t=sum(L,C),days={};
+ L.forEach(e=>(days[dayKey(e.start)]=days[dayKey(e.start)]||[]).push(e));
+ return`<div class="stats"><div class="card stat"><span class="muted">${L.length} entries</span><b>${hm(t.m)}</b></div><div class="card stat"><span class="muted">Earnings</span><b>${money(t.pay)}</b></div></div>
+ <div class="row" style="margin-bottom:6px"><button class="pri" data-a="mkInv" ${L.length?'':'disabled'}>Create invoice</button><button data-a="csvF" ${L.length?'':'disabled'}>Export CSV</button></div>`+
+ (Object.keys(days).map(k=>{const D=days[k],d=sum(D,C);return`<div class="dayh"><span>${dStr(D[0].start)}</span><span>${hm(d.m)} · ${money(d.pay)}</span></div><div class="card" style="padding:4px 14px">`+
+  D.map(e=>{const j=jobOf(e.jobId),c=C[e.id];
+   return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted job')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.brk?`, ${e.brk}m break`:''}${e.note?`<br>${esc(e.note)}`:''}</div>${(e.tags||[]).map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}${(e.photos||[]).length?`<span class="tag">📷 ${e.photos.length}</span>`:''}${e.inv?'<span class="tag">invoiced</span>':''}</div>
+   <div class="right">${hm(c.m)}<div class="muted">${c.o?hm(c.o)+' OT':money(c.pay)}</div></div></div>`}).join('')+`</div>`}).join('')||'<div class="card muted center">No matching entries.</div>')}
+function vLog(){
+ return`<h2>Log</h2><div class="card"><input data-f="q" placeholder="Search notes, clients, tags" value="${esc(F.q)}">
+ <div class="row"><select data-f="job"><option value="">All jobs</option>${jobOpts(F.job)}</select><select data-f="tag"><option value="">All tags</option>${allTags().map(t=>`<option ${t===F.tag?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
+ <div class="row"><input type="date" data-f="from" value="${F.from}"><input type="date" data-f="to" value="${F.to}"></div>
+ <div class="row"><select data-f="st">${[['all','All entries'],['open','Not invoiced'],['billed','Invoiced']].map(x=>`<option value="${x[0]}" ${F.st===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select><button data-a="clrF">Clear filters</button></div></div>
+ <div id="res">${resHtml()}</div><button class="fab" data-a="addE">+</button>`}
+
+/* ---------- invoices ---------- */
+const tot=iv=>{const s=iv.items.reduce((a,i)=>a+i.q*i.r,0),t=s*iv.tax/100;return{s,t,g:s+t}};
+function vInv(){
+ const L=[...S.invoices].sort((a,b)=>b.date.localeCompare(a.date)),out=L.filter(i=>i.status==='sent').reduce((a,i)=>a+tot(i).g,0);
+ return`<h2>Invoices</h2><div class="card stat"><span class="muted">Sent, awaiting payment</span><b style="color:var(--stop)">${money(out)}</b></div>`+
+ (L.length?`<div class="card" style="padding:4px 14px">`+L.map(i=>`<div class="item ${i.status}" data-a="openI" data-v="${i.id}"><div>${esc(i.num)}<div class="muted">${esc(i.client)} · ${i.date}</div></div><div class="right">${money(tot(i).g)}<span class="st ${i.status}">${({draft:"Draft",sent:"Sent, unpaid",paid:"Paid"})[i.status]}</span></div></div>`).join('')+`</div>`
+ :`<div class="card muted center">No invoices yet. In the Log tab, filter to a job and date range, then tap Create invoice.</div>`)}
+function mkInv(){
+ const L=filt().filter(e=>!e.inv).reverse();
+ if(!L.length){alert('These entries are already invoiced. Set the filter to "Not invoiced".');return}
+ const C=calc(S.entries),b=S.biz,items=[],j0=jobOf(L[0].jobId)||{};
+ L.forEach(e=>{const c=C[e.id],j=jobOf(e.jobId)||{name:'Work',rate:0},d=dStr(e.start)+', '+j.name+(e.note?': '+e.note:'');
+  if(c.r>0)items.push({d,q:+(c.r/60).toFixed(2),r:j.rate});
+  if(c.o>0)items.push({d:d+' (overtime)',q:+(c.o/60).toFixed(2),r:+(j.rate*S.settings.otMult).toFixed(2)})});
+ const due=new Date();due.setDate(due.getDate()+b.terms);
+ IV={id:uid(),num:b.prefix+String(b.next).padStart(3,'0'),date:dayKey(Date.now()),due:dayKey(+due),client:j0.client||j0.name||'',email:j0.email||'',addr:j0.addr||'',notes:b.pay||'',tax:b.tax,status:'draft',items,eids:L.map(e=>e.id),pics:L.some(e=>(e.photos||[]).length>0),isNew:true};
+ invM()}
+function readIV(){const g=i=>$(i).value;
+ Object.assign(IV,{num:g('#in'),status:g('#is'),date:g('#id'),due:g('#iu'),client:g('#ic'),email:g('#ie'),addr:g('#ia'),tax:parseFloat(g('#it'))||0,notes:g('#inn'),pics:$('#ip').checked});
+ document.querySelectorAll('[data-i]').forEach(el=>{const i=IV.items[el.dataset.i],k=el.dataset.k;i[k]=k==='d'?el.value:(parseFloat(el.value)||0)})}
+function invM(){const T=tot(IV);
+ openM(`<h3>${IV.isNew?'New invoice':'Invoice '+esc(IV.num)}</h3>
+ <div class="row"><label>Number<input id="in" value="${esc(IV.num)}"></label><label>Status<select id="is">${['draft','sent','paid'].map(x=>`<option ${IV.status===x?'selected':''}>${x}</option>`).join('')}</select></label></div>
+ <div class="row"><label>Date<input type="date" id="id" value="${IV.date}"></label><label>Due<input type="date" id="iu" value="${IV.due}"></label></div>
+ <label>Bill to<input id="ic" value="${esc(IV.client)}"></label><label>Client email<input id="ie" type="email" value="${esc(IV.email)}"></label>
+ <label>Client address<textarea id="ia" rows="2">${esc(IV.addr)}</textarea></label><b>Line items</b>
+ ${IV.items.map((i,n)=>`<div class="card" style="margin:8px 0"><input data-i="${n}" data-k="d" value="${esc(i.d)}"><div class="row"><label>Hours / qty<input type="number" step="0.01" data-i="${n}" data-k="q" value="${i.q}"></label><label>Rate<input type="number" step="0.01" data-i="${n}" data-k="r" value="${i.r}"></label><button class="danger" data-a="ivDel" data-v="${n}" style="flex:0 0 auto">✕</button></div></div>`).join('')}
+ <button data-a="ivAdd" style="width:100%;margin-bottom:10px">Add line</button>
+ <label>Tax (%)<input type="number" step="0.01" id="it" value="${IV.tax}"></label><label>Notes / payment details<textarea id="inn" rows="3">${esc(IV.notes)}</textarea></label>
+ <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="ip" style="width:auto;margin:0" ${IV.pics?'checked':''}>Add work photos to the PDF (${S.entries.filter(e=>(IV.eids||[]).includes(e.id)).reduce((a,e)=>a+(e.photos||[]).length,0)} available)</label><div class="between"><b>Total</b><b>${money(T.g)}</b></div>
+ <div class="row" style="margin-top:12px"><button data-a="close">Close</button><button class="pri" data-a="ivSave">Save</button></div>
+ <div class="row" style="margin-top:8px"><button data-a="ivShare">Share / email PDF</button><button data-a="ivPdf">Download PDF</button></div>
+ ${IV.isNew?'':'<button class="danger" data-a="ivDelete" style="width:100%;margin-top:8px">Delete invoice</button>'}`)}
+const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('ts_photos',1);r.onupgradeneeded=()=>r.result.createObjectStore('p');r.onsuccess=()=>ok(r.result);r.onerror=no});
+const pPut=async(k,v)=>{const d=await idb();return new Promise((ok,no)=>{const t=d.transaction('p','readwrite');t.objectStore('p').put(v,k);t.oncomplete=ok;t.onerror=no})};
+const pGet=async k=>{const d=await idb();return new Promise(ok=>{const q=d.transaction('p').objectStore('p').get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>ok(null)})};
+const pDel=async k=>{const d=await idb();return new Promise(ok=>{const t=d.transaction('p','readwrite');t.objectStore('p').delete(k);t.oncomplete=ok;t.onerror=ok})};
+const shrink=f=>new Promise((ok,no)=>{const im=new Image(),u=URL.createObjectURL(f);im.onload=()=>{const sc=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*sc;c.height=im.height*sc;c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL('image/jpeg',0.72))};im.onerror=no;im.src=u});
+async function showPh(el,ids){el.innerHTML='';for(const id of ids){const u=await pGet(id);if(!u)continue;const w=document.createElement('div');w.className='ph';w.innerHTML='<img src="'+u+'"><button data-a="rmPh" data-v="'+id+'">✕</button>';el.appendChild(w)}}
+function syncP(){if(curE){const e=S.entries.find(x=>x.id===curE);if(e){e.photos=[...EP];save()}}}
+async function addPhotos(fs){for(const f of fs){try{const u=await shrink(f),id=uid();await pPut(id,u);EP.push(id)}catch(e){alert('Could not add that photo.')}}
+ syncP();const ph=$('#ph');if(ph)showPh(ph,EP);const i=$('#pf');if(i)i.value=''}
+async function addPics(d){
+ const es=S.entries.filter(e=>(IV.eids||[]).includes(e.id)).sort((a,b)=>a.start-b.start);let y=0,col=0,first=true;
+ for(const e of es)for(const id of e.photos||[]){const u=await pGet(id);if(!u)continue;
+  const im=await new Promise(ok=>{const i=new Image();i.onload=()=>ok(i);i.src=u}),sc=Math.min(86/im.width,68/im.height),w=im.width*sc,h=im.height*sc;
+  if(first){d.addPage();d.setFontSize(14);d.text('Proof of work',14,20);y=28;first=false}
+  else if(col===0&&y+80>285){d.addPage();y=20}
+  const x=col?108:14;d.addImage(u,'JPEG',x,y,w,h);d.setFontSize(8);d.text((dStr(e.start)+(e.note?' - '+e.note:'')).slice(0,60),x,y+h+4);
+  if(col){y+=80;col=0}else col=1}}
+let IMP=null;
+function parseCSV(t){const R=[];let r=[],f='',q=false;
+ for(let i=0;i<t.length;i++){const c=t[i];
+  if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}
+  else if(c=='"')q=true;else if(c==','){r.push(f);f=''}
+  else if(c=='\n'||c=='\r'){if(c=='\r'&&t[i+1]=='\n')i++;r.push(f);f='';if(r.some(x=>x.trim()))R.push(r);r=[]}else f+=c}
+ r.push(f);if(r.some(x=>x.trim()))R.push(r);return R}
+const HX={date:/date|day/i,start:/start|clock.?in|^in$|from|begin/i,end:/end|clock.?out|^out$|finish|stop/i,dur:/dur|hours|hrs|total|elapsed/i,brk:/break/i,job:/job|project|client|customer/i,note:/note|desc|memo|comment|task|detail/i,tags:/tag|label/i};
+const FL=[['date','Date'],['start','Start time'],['end','End time'],['dur','Duration (hours)'],['brk','Break (minutes)'],['job','Job / client'],['note','Notes'],['tags','Tags']];
+function guess(h){const m={},u=new Set();['start','end','brk','date','dur','job','note','tags'].forEach(k=>{const i=h.findIndex((x,n)=>!u.has(n)&&HX[k].test(x));if(i>=0){m[k]=i;u.add(i)}});return m}
+function parseDate(s){s=(s||'').trim();let m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);if(m)return new Date(+m[1],m[2]-1,+m[3]);
+ m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);if(m){let a=+m[1],b=+m[2],y=+m[3];if(y<100)y+=2000;return a>12?new Date(y,b-1,a):new Date(y,a-1,b)}
+ const t=Date.parse(s);if(t){const d=new Date(t);return new Date(d.getFullYear(),d.getMonth(),d.getDate())}return null}
+const parseTm=s=>{const m=(s||'').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?m?/i);if(!m)return null;let h=+m[1];const a=m[3]&&m[3].toLowerCase();if(a==='p'&&h<12)h+=12;if(a==='a'&&h===12)h=0;return h*60+ +m[2]};
+const parseDur=s=>{s=(s||'').trim();if(!s)return null;if(s.includes(':')){const x=s.split(':');return +x[0]*60+(+x[1]||0)}const v=parseFloat(s);return isNaN(v)?null:v*60};
+function rowToEntry(r,M){
+ const g=k=>M[k]>=0?(r[M[k]]||'').trim():'';
+ const ds=g('date')||g('start'),d=parseDate(ds);if(!d)return null;
+ const em=parseTm(g('end')),dm=parseDur(g('dur')),brk=g('brk').includes(':')?parseDur(g('brk')):(parseFloat(g('brk'))||0);
+ let sm=parseTm(g('start'));if(sm==null)sm=parseTm(ds);if(sm==null)sm=(em==null&&dm!=null)?540:0;
+ const start=+d+sm*60000;let end;
+ if(em!=null){end=+d+em*60000;if(end<=start)end+=864e5}
+ else if(dm!=null)end=start+(dm+brk)*60000;else return null;
+ if(end<=start)return null;
+ return{start,end,brk:Math.round(brk),note:g('note'),tags:parseTags(g('tags'))}}
+const pv=()=>{const e=rowToEntry(IMP.rows[0],IMP.M);return e?'First row reads as: '+dStr(e.start)+', '+tStr(e.start)+' to '+tStr(e.end)+(e.brk?', '+e.brk+'m break':''):'First row could not be read with these columns.'};
+function impM(){openM(`<h3>Import from CSV</h3><div class="muted" style="margin-bottom:8px">${IMP.rows.length} rows found. Check that each field points at the right column.</div>
+ ${FL.map(x=>`<label>${x[1]}<select data-m="${x[0]}"><option value="-1">(none)</option>${IMP.head.map((h,i)=>`<option value="${i}" ${IMP.M[x[0]]===i?'selected':''}>${esc(h)}</option>`).join('')}</select></label>`).join('')}
+ <label>Job for rows without a job<select id="imj">${jobOpts(S.lastJob)}</select></label><div class="muted" id="ipv" style="margin-bottom:10px">${pv()}</div>
+ <div class="row"><button data-a="close">Cancel</button><button class="pri" data-a="doImp">Import</button></div>`)}
+function doImport(){
+ const M=IMP.M,dj=$('#imj').value,pal=['#1f8f5f','#3b82c9','#c93b8c','#8a5cd6','#e08a00','#2aa7a7'],seen=new Set(S.entries.map(e=>e.jobId+'|'+e.start+'|'+e.end));let ok=0,sk=0,dup=0;
+ IMP.rows.forEach(r=>{const e=rowToEntry(r,M);if(!e){sk++;return}
+  const nm=M.job>=0?(r[M.job]||'').trim():'';let j=nm?S.jobs.find(x=>x.name.toLowerCase()===nm.toLowerCase()):jobOf(dj);
+  if(!j){j={id:uid(),name:nm,rate:0,color:pal[S.jobs.length%6],client:nm,email:'',addr:''};S.jobs.push(j)}
+  const k=j.id+'|'+e.start+'|'+e.end;if(seen.has(k)){dup++;return}seen.add(k);
+  S.entries.push(Object.assign({id:uid(),jobId:j.id},e));ok++});
+ save();closeM();render();alert('Imported '+ok+' entries. Skipped '+sk+' unreadable rows and '+dup+' duplicates. Any new jobs have a rate of 0, so set their rates in Settings.')}
+const loadPdf=()=>window.jspdf?Promise.resolve():new Promise((ok,no)=>{const x=document.createElement('script');x.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';x.onload=ok;x.onerror=no;document.head.appendChild(x)});
+async function makePdf(){
+ readIV();await loadPdf();
+ const d=new window.jspdf.jsPDF(),b=S.biz,T=tot(IV),m=v=>S.settings.cur+v.toFixed(2),R={align:'right'};let y=20;
+ d.setFontSize(22);d.text('INVOICE',14,y);d.setFontSize(10);d.text(['#'+IV.num,'Date: '+IV.date,'Due: '+IV.due],196,y-8,R);
+ y+=12;d.setFont(undefined,'bold');d.text(b.name||'',14,y);d.text('Bill to',120,y);d.setFont(undefined,'normal');
+ d.text(d.splitTextToSize(b.info||'',80),14,y+5);d.text(d.splitTextToSize([IV.client,IV.addr,IV.email].filter(Boolean).join('\n'),76),120,y+5);
+ y+=36;d.line(14,y,196,y);y+=6;d.setFont(undefined,'bold');d.text('Description',14,y);d.text('Qty',120,y,R);d.text('Rate',152,y,R);d.text('Amount',196,y,R);d.setFont(undefined,'normal');y+=4;d.line(14,y,196,y);y+=6;
+ IV.items.forEach(i=>{const ln=d.splitTextToSize(i.d,95);if(y>265){d.addPage();y=20}
+  d.text(ln,14,y);d.text(String(i.q),120,y,R);d.text(m(i.r),152,y,R);d.text(m(i.q*i.r),196,y,R);y+=ln.length*5+2});
+ y+=2;d.line(120,y,196,y);y+=6;d.text('Subtotal',152,y,R);d.text(m(T.s),196,y,R);
+ if(IV.tax){y+=6;d.text('Tax ('+IV.tax+'%)',152,y,R);d.text(m(T.t),196,y,R)}
+ y+=7;d.setFont(undefined,'bold');d.setFontSize(12);d.text('Total',152,y,R);d.text(m(T.g),196,y,R);
+ d.setFont(undefined,'normal');d.setFontSize(10);d.text(d.splitTextToSize(IV.notes||'',180),14,y+14);
+ if(IV.pics)await addPics(d);return d.output('blob')}
+
+function vSum(){
+ const C=calc(S.entries),r=range(off),L=S.entries.filter(e=>e.start>=r[0]&&e.start<r[1]),t=sum(L,C);
+ const byJob=S.jobs.map(j=>({j,t:sum(L.filter(e=>e.jobId===j.id),C)})).filter(x=>x.t.m>0);
+ const n=Math.round((r[1]-r[0])/864e5),per=[];
+ for(let i=0;i<n;i++){const d=new Date(r[0]);d.setDate(d.getDate()+i);const k=dayKey(+d);per.push({d:d.getDate(),m:sum(L.filter(e=>dayKey(e.start)===k),C).m})}
+ const mx=Math.max(1,...per.map(x=>x.m));
+ return`<h2>Summary</h2>
+ <div class="between card"><button data-a="prev">‹</button><div class="center"><b>${rLabel(r)}</b><div class="muted">${S.settings.period}</div></div><button data-a="next">›</button></div>
+ <div class="stats"><div class="card stat"><span class="muted">Total hours</span><b>${hm(t.m)}</b></div><div class="card stat"><span class="muted">Earnings</span><b>${money(t.pay)}</b></div>
+ <div class="card stat"><span class="muted">Regular</span><b>${hm(t.r)}</b></div><div class="card stat"><span class="muted">Overtime</span><b>${hm(t.o)}</b></div></div>
+ <div class="card"><b>Hours per day</b><div class="bars">${per.map(x=>`<div><i style="height:${x.m/mx*100*0.8}%"></i>${n<=16?x.d:''}</div>`).join('')}</div></div>
+ <div class="card"><b>By job</b>${byJob.length?byJob.map(x=>`<div class="item" style="cursor:default"><span><span class="dot" style="background:${x.j.color}"></span>${esc(x.j.name)}</span><span class="right">${hm(x.t.m)} · ${money(x.t.pay)}</span></div>`).join(''):'<div class="muted">Nothing tracked in this period.</div>'}</div>
+ <button class="pri" style="width:100%" data-a="csvP">Export this period (CSV)</button>`}
+
+function vSet(){const s=S.settings;
+ const num=(k,l,step)=>`<label>${l}<input type="number" min="0" step="${step||1}" data-s="${k}" value="${s[k]}"></label>`;
+ return`<h2>Settings</h2>
+ <div class="card"><div class="between"><b>Jobs and rates</b><button data-a="addJ">Add</button></div>
+ ${S.jobs.map(j=>`<div class="item" data-a="editJ" data-v="${j.id}"><span><span class="dot" style="background:${j.color}"></span>${esc(j.name)}</span><span class="right">${money(j.rate)}/h</span></div>`).join('')}</div>
+ <div class="card"><b>Pay rules</b><br><br>
+ <label>Round time to<select data-s="round" data-n="1">${[0,3,5,6,10,15,30,60].map(v=>`<option value="${v}" ${s.round===v?'selected':''}>${v?v+' minutes':'No rounding'}</option>`).join('')}</select></label>
+ ${num('otDaily','Daily overtime after (hours, 0 = off)',0.5)}${num('otWeekly','Weekly overtime after (hours, 0 = off)',0.5)}${num('otMult','Overtime pay multiplier',0.25)}
+ <label>Currency symbol<input data-s="cur" value="${esc(s.cur)}" maxlength="3"></label></div>
+ <div class="card"><b>Weeks and pay periods</b><br><br>
+ <label>Week starts on<select data-s="weekStart" data-n="1">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d,i)=>`<option value="${i}" ${s.weekStart===i?'selected':''}>${d}</option>`).join('')}</select></label>
+ <label>Pay period<select data-s="period">${['weekly','biweekly','semimonthly','monthly'].map(v=>`<option ${s.period===v?'selected':''}>${v}</option>`).join('')}</select></label>
+ ${s.period==='biweekly'?`<label>Start date of any biweekly period<input type="date" data-s="anchor" value="${s.anchor}"></label>`:''}</div>
+ <div class="card"><b>Invoice details</b><br><br><label>Your business name<input data-b="name" value="${esc(S.biz.name)}"></label>
+ <label>Your address, email, phone<textarea data-b="info" rows="3">${esc(S.biz.info)}</textarea></label><label>Default payment notes<textarea data-b="pay" rows="2">${esc(S.biz.pay)}</textarea></label>
+ <div class="row"><label>Number prefix<input data-b="prefix" value="${esc(S.biz.prefix)}"></label><label>Next number<input type="number" data-b="next" value="${S.biz.next}"></label></div>
+ <div class="row"><label>Due in (days)<input type="number" data-b="terms" value="${S.biz.terms}"></label><label>Default tax %<input type="number" step="0.01" data-b="tax" value="${S.biz.tax}"></label></div></div>
+ <div class="card"><b>Data</b><br><br><div class="row"><button data-a="csvAll">Export CSV</button><button data-a="bk">Backup</button></div><br>
+ <label>Import hours from a CSV file<input type="file" id="cf" accept=".csv,text/csv"></label>
+ <label>Restore from backup<input type="file" id="rf" accept=".json,application/json"></label>
+ <button class="danger" data-a="wipe" style="width:100%">Erase all data</button></div>
+ <p class="muted center">Timesheet v${VER}. Data is stored on this device only.</p>`}
+
+/* ---------- modals ---------- */
+const openM=h=>{$('#sheet').innerHTML=h;$('#modal').classList.add('open');const ph=$('#ph');if(ph)showPh(ph,EP)};
+const closeM=()=>$('#modal').classList.remove('open');
+
+function entryM(id,day,fin){EP=id?[...(S.entries.find(x=>x.id===id).photos||[])]:[];curE=id||null;
+ const e=id?S.entries.find(x=>x.id===id):{jobId:S.lastJob||S.jobs[0].id,start:day?new Date(day+'T09:00').getTime():Date.now()-36e5,end:day?new Date(day+'T17:00').getTime():Date.now(),brk:0,note:''};
+ openM(`<h3>${fin?'Nice work. Add the details':id?'Edit entry':'Add entry'}</h3>
+ <label>Job<select id="mj">${jobOpts(e.jobId)}</select></label>
+ <label>Start<input type="datetime-local" id="ms" value="${toLocal(e.start)}"></label>
+ <label>End<input type="datetime-local" id="me" value="${toLocal(e.end)}"></label>
+ <label>Break (minutes)<input type="number" min="0" id="mb" value="${e.brk||0}"></label>
+ <label>Note<input id="mn" value="${esc(e.note)}"></label><label>Tags<input id="mt" value="${esc((e.tags||[]).join(', '))}"></label><div style="margin-bottom:10px">${tagChips('mt')}</div><label>Photos of work done<input type="file" id="pf" accept="image/*" multiple></label><div class="phs" id="ph"></div>
+ <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delE" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveE" data-v="${id||''}">Save</button></div>`)}
+
+function dayM(k){
+ const C=calc(S.entries),L=S.entries.filter(e=>dayKey(e.start)===k).sort((a,b)=>a.start-b.start),t=sum(L,C);
+ openM(`<h3>${dStr(new Date(k+'T00:00').getTime())}</h3>
+ <div class="muted" style="margin-bottom:8px">${hm(t.m)} hours, ${money(t.pay)}</div>
+ ${L.length?L.map(e=>{const j=jobOf(e.jobId),c=C[e.id];return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted job')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.note?`<br>${esc(e.note)}`:''}</div></div><div class="right">${hm(c.m)}<div class="muted">${money(c.pay)}</div></div></div>`}).join(''):'<div class="muted">No entries on this day.</div>'}
+ <div class="row" style="margin-top:14px"><button data-a="close">Close</button><button class="pri" data-a="addD" data-v="${k}">Add entry</button></div>`)}
+
+function jobM(id){
+ const j=id?jobOf(id):{name:'',rate:0,color:'#f2a900',client:'',email:'',addr:''};
+ openM(`<h3>${id?'Edit job':'Add job'}</h3>
+ <label>Name<input id="jn" value="${esc(j.name)}"></label>
+ <label>Hourly rate<input type="number" min="0" step="0.01" id="jr" value="${j.rate}"></label>
+ <label>Client name (for invoices)<input id="jl" value="${esc(j.client)}"></label><label>Client email<input id="jm" type="email" value="${esc(j.email)}"></label><label>Client address<textarea id="ja" rows="2">${esc(j.addr)}</textarea></label><label>Color<input type="color" id="jc" value="${j.color}"></label>
+ <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delJ" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveJ" data-v="${id||''}">Save</button></div>`)}
+
+/* ---------- export ---------- */
+function csv(list){
+ const C=calc(S.entries),rows=[['Date','Job','Start','End','Break (min)','Hours','Regular hours','Overtime hours','Earnings','Note']];
+ [...list].sort((a,b)=>a.start-b.start).forEach(e=>{const c=C[e.id],j=jobOf(e.jobId);
+  rows.push([dayKey(e.start),j?j.name:'',tStr(e.start),tStr(e.end),e.brk||0,(c.m/60).toFixed(2),(c.r/60).toFixed(2),(c.o/60).toFixed(2),c.pay.toFixed(2),e.note||''])});
+ return rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n')}
+function dl(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),3000)}
+
+/* ---------- actions ---------- */
+const A={
+ tab(v){tab=v;if(v==='sum')off=0;render()},
+ start(){const jid=$('#tj').value;S.lastJob=jid;S.running={jobId:jid,start:Date.now(),brkMs:0,brkStart:null};save();render()},
+ stop(){const r=S.running,id=uid(),n=Date.now(),bm=r.brkMs+(r.brkStart?n-r.brkStart:0);S.entries.push({id,jobId:r.jobId,start:r.start,end:n,brk:Math.round(bm/60000),note:'',tags:[]});S.running=null;save();render();entryM(id,null,true)},
+ addE(){entryM()},brk(){const r=S.running,n=Date.now();if(r.brkStart){r.brkMs+=n-r.brkStart;r.brkStart=null}else r.brkStart=n;save();render()},doImp(){doImport()},rmPh(v){EP=EP.filter(x=>x!==v);pDel(v);syncP();showPh($('#ph'),EP)},addTag(v,el){const i=$('#'+el.dataset.t),c=parseTags(i.value);if(!c.includes(v))c.push(v);i.value=c.join(', ')},
+ clrF(){F={job:'',tag:'',from:'',to:'',q:'',st:'all'};render()},csvF(){dl('timesheet-filtered.csv',csv(filt()),'text/csv')},mkInv(){mkInv()},
+ openI(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));invM()},
+ ivAdd(){readIV();IV.items.push({d:'',q:1,r:0});invM()},ivDel(v){readIV();IV.items.splice(+v,1);invM()},
+ ivSave(){readIV();if(IV.isNew){delete IV.isNew;S.invoices.push(IV);S.entries.forEach(e=>{if(IV.eids.includes(e.id))e.inv=IV.id});S.biz.next++}
+  else S.invoices[S.invoices.findIndex(i=>i.id===IV.id)]=IV;save();closeM();render()},
+ ivDelete(){if(confirm('Delete this invoice? Its entries become uninvoiced.')){S.entries.forEach(e=>{if(e.inv===IV.id)delete e.inv});S.invoices=S.invoices.filter(i=>i.id!==IV.id);save();closeM();render()}},
+ async ivPdf(){try{const b=await makePdf();dl('Invoice-'+IV.num+'.pdf',b,'application/pdf')}catch(e){alert('The PDF tool loads from the internet. Check your connection and try again.')}},
+ async ivShare(){try{const b=await makePdf(),f=new File([b],'Invoice-'+IV.num+'.pdf',{type:'application/pdf'}),txt='Invoice '+IV.num+' from '+(S.biz.name||'me')+': '+money(tot(IV).g)+', due '+IV.due+'.';
+  if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f],title:'Invoice '+IV.num,text:txt});
+  else{dl(f.name,f,'application/pdf');location.href='mailto:'+IV.email+'?subject='+encodeURIComponent('Invoice '+IV.num)+'&body='+encodeURIComponent(txt+'\n\nAttach the downloaded PDF.')}
+ }catch(e){if(!e||e.name!=='AbortError')alert('Could not create the PDF. It needs an internet connection the first time.')}},
+ day(v){dayM(v)},addD(v){entryM(null,v)},calPrev(){cOff--;render()},calNext(){cOff++;render()},calNow(){cOff=0;render()},editE(v){entryM(v)},close(){closeM()},
+ saveE(v){const s=new Date($('#ms').value).getTime(),e=new Date($('#me').value).getTime();
+  if(!s||!e||e<=s){alert('End time must be after start time.');return}
+  const d={jobId:$('#mj').value,start:s,end:e,brk:Math.max(0,parseInt($('#mb').value)||0),note:$('#mn').value.trim(),tags:parseTags($('#mt').value),photos:[...EP]};
+  if(v)Object.assign(S.entries.find(x=>x.id===v),d);else S.entries.push(Object.assign({id:uid()},d));
+  S.lastJob=d.jobId;save();closeM();render()},
+ delE(v){if(confirm('Delete this entry?')){S.entries=S.entries.filter(x=>x.id!==v);save();closeM();render()}},
+ addJ(){jobM()},editJ(v){jobM(v)},
+ saveJ(v){const d={name:$('#jn').value.trim()||'Untitled',rate:parseFloat($('#jr').value)||0,color:$('#jc').value,client:$('#jl').value.trim(),email:$('#jm').value.trim(),addr:$('#ja').value.trim()};
+  if(v)Object.assign(jobOf(v),d);else S.jobs.push(Object.assign({id:uid()},d));save();closeM();render()},
+ delJ(v){if(S.jobs.length<2){alert('Keep at least one job.');return}
+  if(S.entries.some(e=>e.jobId===v)){alert('This job has entries. Delete or move them first.');return}
+  if(confirm('Delete this job?')){S.jobs=S.jobs.filter(j=>j.id!==v);save();closeM();render()}},
+ prev(){off--;render()},next(){off++;render()},
+ csvP(){const r=range(off);dl('timesheet-'+dayKey(r[0])+'.csv',csv(S.entries.filter(e=>e.start>=r[0]&&e.start<r[1])),'text/csv')},
+ csvAll(){dl('timesheet-all.csv',csv(S.entries),'text/csv')},
+ bk(){dl('timesheet-backup-'+dayKey(Date.now())+'.json',JSON.stringify(S),'application/json')},
+ wipe(){if(confirm('Erase all jobs and entries? This cannot be undone.')&&confirm('Really erase everything?')){S=def();indexedDB.deleteDatabase('ts_photos');save();render()}}
+};
+document.addEventListener('click',ev=>{
+ if(ev.target.id==='modal'){closeM();return}
+ const el=ev.target.closest('[data-a]');if(el&&A[el.dataset.a])A[el.dataset.a](el.dataset.v,el)});
+document.addEventListener('change',ev=>{
+ const t=ev.target;
+ if(t.id==='rf'&&t.files[0]){const f=new FileReader();f.onload=()=>{try{const d=JSON.parse(f.result);if(!Array.isArray(d.jobs)||!Array.isArray(d.entries))throw 0;
+  if(confirm('Replace current data with this backup?')){localStorage.setItem(KEY,JSON.stringify(d));S=load();render()}}catch(e){alert('That file is not a valid Timesheet backup.')}};f.readAsText(t.files[0]);return}
+ if(t.id==='pf'){addPhotos(t.files);return}
+ if(t.dataset.m){IMP.M[t.dataset.m]=parseInt(t.value);$('#ipv').textContent=pv();return}
+ if(t.id==='cf'&&t.files[0]){const f=new FileReader();f.onload=()=>{const R=parseCSV(String(f.result).replace(/^\uFEFF/,''));if(R.length<2){alert('That file has no data rows.');return}IMP={head:R[0].map(x=>x.trim()),rows:R.slice(1),M:guess(R[0])};impM()};f.readAsText(t.files[0]);t.value='';return}
+ if(t.dataset.f){fl(t);return}
+ if(t.dataset.b){S.biz[t.dataset.b]=t.type==='number'?(parseFloat(t.value)||0):t.value;save();return}
+ const k=t.dataset.s;if(!k)return;
+ S.settings[k]=(t.type==='number'||t.dataset.n)?(parseFloat(t.value)||0):t.value;save();render()});
+const fl=t=>{F[t.dataset.f]=t.value;const r=$('#res');if(r)r.innerHTML=resHtml()};
+document.addEventListener('input',ev=>{if(ev.target.dataset.f)fl(ev.target)});
+setInterval(()=>{const c=$('#clock');if(c&&S.running)c.textContent=hms(workMs(S.running))},1000);
+render();
+</script>
+</body>
+</html>
