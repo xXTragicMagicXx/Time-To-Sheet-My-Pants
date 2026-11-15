@@ -60,7 +60,13 @@ button.go{background:var(--go)}button.stop{background:var(--stop)}
 .cd u{display:flex;gap:2px;min-height:6px;text-decoration:none}
 .cd i{width:6px;height:6px;border-radius:50%}
 .cd.out{opacity:.45}
-.cd.today{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.cd.today span{background:var(--acc);color:var(--accink);font-weight:700;border-radius:99px;padding:0 5px;margin-left:2px}
+/* Invoice status of a day: least-finished invoice wins; dashed when some of the day isn't invoiced */
+.cd.iv{border-width:2px;border-color:var(--ivc);background:color-mix(in srgb,var(--ivc) 13%,var(--card))}
+.cd.iv.paid{--ivc:var(--go)}.cd.iv.sent{--ivc:var(--stop)}.cd.iv.draft{--ivc:#e08a00}.cd.part{border-style:dashed}
+.lg{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;margin:10px 0 2px;font-size:12px;color:var(--mute)}
+.lg i{display:inline-block;width:14px;height:12px;border-radius:3px;border:2px solid var(--ivc);margin-right:5px;vertical-align:-2px;background:color-mix(in srgb,var(--ivc) 13%,var(--card))}
+.lg .paid{--ivc:var(--go)}.lg .sent{--ivc:var(--stop)}.lg .draft{--ivc:#e08a00}.lg .part{--ivc:var(--mute);border-style:dashed}
 .wt{background:var(--acc);color:var(--accink);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-variant-numeric:tabular-nums}
 .wt b{font-size:14px}.wt span{font-size:11px}
 .tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:1px 8px;font-size:12px;margin:2px 4px 0 0;color:var(--mute)}
@@ -83,7 +89,7 @@ a.btn.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);font
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.8';
+const VER='1.9';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -183,8 +189,10 @@ function vCal(){
    const k=dayKey(+d),L=byDay[k]||[],t=sum(L,C),inM=d.getMonth()===mo;
    wm.push(...L);
    if(inM){mt.m+=t.m;mt.pay+=t.pay}
+   const ivs=L.filter(e=>e.inv).map(e=>(S.invoices.find(i=>i.id===e.inv)||{}).status).filter(Boolean);
+   const ivc=ivs.length?' iv '+['draft','sent','paid'].find(x=>ivs.includes(x))+(ivs.length<L.length?' part':''):'';
    const dots=[...new Set(L.map(e=>e.jobId))].slice(0,4).map(id=>`<i style="background:${jobOf(id)?jobOf(id).color:'#999'}"></i>`).join('');
-   cells+=`<div class="cd ${inM?'':'out'} ${k===today?'today':''}" data-a="day" data-v="${k}"><span>${d.getDate()}</span><b>${t.m?hm(t.m):''}</b><u>${dots}</u></div>`;
+   cells+=`<div class="cd ${inM?'':'out'} ${k===today?'today':''}${ivc}" data-a="day" data-v="${k}"><span>${d.getDate()}</span><b>${t.m?hm(t.m):''}</b><u>${dots}</u></div>`;
    d.setDate(d.getDate()+1);
   }
   const w=sum(wm,C);
@@ -193,6 +201,7 @@ function vCal(){
  return`<h2>Calendar</h2>
  <div class="cmh"><button data-a="calPrev">‹</button><b>${ref.toLocaleDateString([],{month:'long',year:'numeric'})}</b><button data-a="calNext">›</button></div>
  <div class="cw">${wd.map(x=>`<div class="chd">${x}</div>`).join('')}<div class="chd">Week</div></div>${rows}
+ <div class="lg"><span><i class="paid"></i>Paid</span><span><i class="sent"></i>Sent, unpaid</span><span><i class="draft"></i>Draft</span><span><i class="part"></i>Partly invoiced</span></div>
  <div class="stats" style="margin-top:12px"><div class="card stat"><span class="muted">Month hours</span><b>${hm(mt.m)}</b></div><div class="card stat"><span class="muted">Month earnings</span><b>${money(mt.pay)}</b></div></div>
  ${cOff?'<button style="width:100%" data-a="calNow">Back to this month</button>':''}
  <p class="muted center">Tap a day to see or add entries. Week totals include days from neighboring months.</p>`}
@@ -393,7 +402,7 @@ function dayM(k){
  const C=calc(S.entries),L=S.entries.filter(e=>dayKey(e.start)===k).sort((a,b)=>a.start-b.start),t=sum(L,C);
  openM(`<h3>${dStr(new Date(k+'T00:00').getTime())}</h3>
  <div class="muted" style="margin-bottom:8px">${hm(t.m)} hours, ${money(t.pay)}</div>
- ${L.length?L.map(e=>{const j=jobOf(e.jobId),c=C[e.id];return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted project')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.note?`<br>${esc(e.note)}`:''}</div></div><div class="right">${hm(c.m)}<div class="muted">${money(c.pay)}</div></div></div>`}).join(''):'<div class="muted">No entries on this day.</div>'}
+ ${L.length?L.map(e=>{const j=jobOf(e.jobId),c=C[e.id];return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted project')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.note?`<br>${esc(e.note)}`:''}</div></div><div class="right">${hm(c.m)}<div class="muted">${money(c.pay)}</div>${(i=>i?`<span class="st ${i.status}">${ST[i.status]}</span>`:'<span class="muted">Not invoiced</span>')(S.invoices.find(i=>i.id===e.inv))}</div></div>`}).join(''):'<div class="muted">No entries on this day.</div>'}
  <div class="row" style="margin-top:14px"><button data-a="close">Close</button><button class="pri" data-a="addD" data-v="${k}">Add entry</button></div>`)}
 
 function jobM(id,cid){
