@@ -11,7 +11,10 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B1%3C/text%3E%3C/svg%3E">
 <style>
 :root{--bg:#eef1f4;--card:#fff;--ink:#1b2530;--mute:#657281;--line:#d9dee4;--acc:#f2a900;--accink:#1b2530;--go:#1f8f5f;--stop:#c93b3b}
-@media(prefers-color-scheme:dark){:root{--bg:#11161c;--card:#1a222b;--ink:#e8edf2;--mute:#8d9aa8;--line:#2a3541;--acc:#f2b51f;--accink:#11161c;--go:#35b97f;--stop:#e4605f}}
+/* Dark colors: follow the phone unless Settings forces light or dark (data-theme on <html>) */
+:root{color-scheme:light dark}:root[data-theme=light]{color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#11161c;--card:#1a222b;--ink:#e8edf2;--mute:#8d9aa8;--line:#2a3541;--acc:#f2b51f;--accink:#11161c;--go:#35b97f;--stop:#e4605f}}
+:root[data-theme=dark]{color-scheme:dark;--bg:#11161c;--card:#1a222b;--ink:#e8edf2;--mute:#8d9aa8;--line:#2a3541;--acc:#f2b51f;--accink:#11161c;--go:#35b97f;--stop:#e4605f}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
@@ -119,7 +122,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.11';
+const VER='1.12';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -127,7 +130,7 @@ const p2=n=>String(n).padStart(2,'0');
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function def(){return{jobs:[{id:uid(),name:'General',rate:0,color:'#f2a900',clientId:null}],clients:[],entries:[],expenses:[],running:null,lastJob:null,lastBk:0,invoices:[],biz:{name:'',info:'',pay:'',prefix:'INV-',next:1,terms:14,tax:0},
- settings:{round:0,otDaily:0,otWeekly:0,otMult:1.5,weekStart:1,cur:'$',period:'weekly',anchor:'2024-01-01',geo:1}}}
+ settings:{round:0,otDaily:0,otWeekly:0,otMult:1.5,weekStart:1,cur:'$',period:'weekly',anchor:'2024-01-01',geo:1,addr:0,theme:'system'}}}
 // Data saved before v1.8 kept client name/email/address on each project ("job").
 // Turn those into real clients (merging same-named ones) and link invoices to them by name.
 function migrate(D){
@@ -187,7 +190,9 @@ const rLabel=r=>{const f=x=>new Date(x).toLocaleDateString([],{month:'short',day
 
 /* ---------- views ---------- */
 const TABS=[['timer','Timer','⏱'],['cal','Calendar','📅'],['log','Log','☰'],['inv','Invoices','🧾'],['cli','Clients','👥'],['sum','Summary','📊'],['set','Settings','⚙']];
-function render(){
+function applyTheme(){const t=S.settings.theme,h=document.documentElement;if(t==='light'||t==='dark')h.dataset.theme=t;else delete h.dataset.theme;
+ const m=document.querySelector('meta[name=theme-color]');if(m)m.content=getComputedStyle(h).getPropertyValue('--acc').trim()||'#f2a900'}
+function render(){applyTheme();
  $('#nav').innerHTML=TABS.map(t=>`<button data-a="tab" data-v="${t[0]}" class="${tab===t[0]?'on':''}"><span>${t[2]}</span>${t[1]}</button>`).join('');
  $('#main').innerHTML=({timer:vTimer,cal:vCal,log:vLog,inv:vInv,cli:vCli,sum:vSum,set:vSet})[tab]();
 }
@@ -420,9 +425,13 @@ function vSet(){const s=S.settings;
  return`<h2>Settings</h2>
  <div class="card"><div class="between"><b>Projects and rates</b><button data-a="addJ">Add</button></div>
  ${S.jobs.map(j=>`<div class="item" data-a="editJ" data-v="${j.id}"><div><span class="dot" style="background:${j.color}"></span>${esc(j.name)}${cliOf(j.clientId)?`<div class="muted">${esc(cliOf(j.clientId).name)}</div>`:''}</div><span class="right">${money(j.rate)}/h</span></div>`).join('')}</div>
+ <div class="card"><b>Appearance</b><br><br>
+ <label>Theme<select data-s="theme">${[['system','Match my phone'],['light','Light'],['dark','Dark']].map(x=>`<option value="${x[0]}" ${s.theme===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></label></div>
  <div class="card"><b>Location</b><br><br>
  <label>Save where I am when I press Start<select data-s="geo" data-n="1"><option value="1" ${s.geo?'selected':''}>On</option><option value="0" ${s.geo?'':'selected'}>Off</option></select></label>
- <div class="muted">Your phone will ask for permission the first time. The location stays on this device. You can also add or change it when editing an entry.</div></div>
+ <div class="muted">Your phone will ask for permission the first time. The location stays on this device. You can also add or change it when editing an entry.</div>
+ <label style="margin-top:12px">Look up the street address automatically<select data-s="addr" data-n="1"><option value="0" ${s.addr?'':'selected'}>Off</option><option value="1" ${s.addr?'selected':''}>On</option></select></label>
+ <div class="muted">When on, the app sends the coordinates of a saved spot to OpenStreetMap, a free public map service, to get its address. Nothing else is sent. It needs an internet connection, and you can always correct the address by hand.</div></div>
  <div class="card"><b>Pay rules</b><br><br>
  <label>Round time to<select data-s="round" data-n="1">${[0,3,5,6,10,15,30,60].map(v=>`<option value="${v}" ${s.round===v?'selected':''}>${v?v+' minutes':'No rounding'}</option>`).join('')}</select></label>
  ${num('otDaily','Daily overtime after (hours, 0 = off)',0.5)}${num('otWeekly','Weekly overtime after (hours, 0 = off)',0.5)}${num('otMult','Overtime pay multiplier',0.25)}
@@ -478,7 +487,13 @@ function nearAddr(p){let best='',bd=150;S.entries.forEach(e=>{const l=e.loc;if(l
 const hasPos=l=>!!l&&l.lat!=null;
 const mapUrl=l=>'https://www.google.com/maps/search/?api=1&query='+l.lat+','+l.lng;
 const locUI=()=>`<div class="row"><button data-a="locGet">📍 ${hasPos(LOC)?'Update spot':'Use my location'}</button>${hasPos(LOC)?`<a class="btn" style="margin:0" href="${mapUrl(LOC)}" target="_blank" rel="noopener">Open in maps</a>`:''}</div>${hasPos(LOC)?`<div class="muted" style="margin-top:6px">Saved spot: ${LOC.lat.toFixed(5)}, ${LOC.lng.toFixed(5)} <span class="tag" data-a="locClr">remove</span></div>`:''}`;
-const setLoc=p=>{LOC=p;const i=$('#ml'),c=$('#lc');if(p&&i&&!i.value.trim())i.value=nearAddr(p);if(c)c.innerHTML=locUI()};
+const setLoc=p=>{LOC=p;const i=$('#ml'),c=$('#lc');if(p&&i&&!i.value.trim())i.value=p.addr||nearAddr(p);if(c)c.innerHTML=locUI()};
+// Opt-in (Settings): ask OpenStreetMap's Nominatim for the street address of a spot. Returns '' when off, offline or unknown.
+async function lookup(p){if(!S.settings.addr)return'';
+ try{const c=new AbortController(),t=setTimeout(()=>c.abort(),8000),r=await fetch('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat='+p.lat+'&lon='+p.lng,{signal:c.signal,headers:{Accept:'application/json'}});clearTimeout(t);
+  const a=(await r.json()).address||{};return[[a.house_number,a.road||a.pedestrian||a.footway||a.path].filter(Boolean).join(' '),a.city||a.town||a.village||a.suburb||a.hamlet||'',a.postcode||''].filter(Boolean).join(', ')}catch(e){return''}}
+// An address you typed nearby before wins over the lookup.
+const addrFor=async p=>nearAddr(p)||await lookup(p);
 
 /* ---------- expenses + quick entry sheets ---------- */
 function expM(id,day){curE=null;curX=id||null;const x=id?S.expenses.find(y=>y.id===id):{jobId:(S.running||{}).jobId||S.lastJob||S.jobs[0].id,date:day||dayKey(Date.now()),amt:'',desc:'',bill:true};EP=[...(x.photos||[])];
@@ -603,7 +618,7 @@ const A={
   if(v){Object.assign(cliOf(v),d);save();closeM();render()}else{const c=Object.assign({id:uid()},d);S.clients.push(c);save();closeM(()=>A.cli(c.id));render()}},
  delC(v){ask('Delete this client? Their projects and invoices are kept, just without a client.','Delete',()=>{S.jobs.forEach(j=>{if(j.clientId===v)j.clientId=null});S.invoices.forEach(i=>{if(i.clientId===v)i.clientId=null});S.clients=S.clients.filter(c=>c.id!==v);selC=null;save();render()})},
  start(){const jid=$('#tj').value,t=Date.now();S.lastJob=jid;S.running={jobId:jid,start:t,brkMs:0,brkStart:null,loc:null};save();render();
-  if(S.settings.geo)getPos().then(p=>{p.addr=nearAddr(p);
+  if(S.settings.geo)getPos().then(async p=>{p.addr=await addrFor(p);
    if(S.running&&S.running.start===t){S.running.loc=p;save();if(tab==='timer')render()}
    else{const e=S.entries.find(x=>x.start===t&&!x.loc);if(e){e.loc=p;save();if(curE===e.id&&$('#lc'))setLoc(Object.assign({},p))}}}).catch(e=>{if(e&&e.code===1)say(geoMsg(e))})},
  stop(){const r=S.running,id=uid(),n=Date.now(),bm=r.brkMs+(r.brkStart?n-r.brkStart:0);S.entries.push({id,jobId:r.jobId,start:r.start,end:n,brk:Math.round(bm/60000),note:'',tags:[],loc:r.loc||null});S.running=null;save();render();entryM(id,null,true)},
@@ -634,7 +649,7 @@ const A={
   if(v)Object.assign(S.expenses.find(x=>x.id===v),d);else S.expenses.push(Object.assign({id:uid()},d));save();closeM();render()},
  delX(v){const x=S.expenses.find(y=>y.id===v),i=x&&S.invoices.find(y=>y.id===x.inv);
   ask(i?'Delete this expense? It stays on invoice '+i.num+', which won\'t change.':'Delete this expense?','Delete',()=>{(x.photos||[]).forEach(pDel);S.expenses=S.expenses.filter(y=>y.id!==v);save();render()})},
- locGet(){say('Finding your location…');getPos().then(p=>{if($('#lc')){setLoc(p);say('Location added. Save the entry to keep it.')}}).catch(e=>say(geoMsg(e)))},
+ locGet(){say('Finding your location…');getPos().then(async p=>{p.addr=await addrFor(p);if($('#lc')){setLoc(p);say('Location added. Save the entry to keep it.')}}).catch(e=>say(geoMsg(e)))},
  locClr(){setLoc(null)},
  delE(v){const e=S.entries.find(x=>x.id===v),i=e&&S.invoices.find(x=>x.id===e.inv);
   ask(i?'Delete this entry? It stays on invoice '+i.num+', which won\'t change.':'Delete this entry?','Delete',()=>{(e.photos||[]).forEach(pDel);S.entries=S.entries.filter(x=>x.id!==v);save();render()})},
