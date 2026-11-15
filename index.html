@@ -136,7 +136,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.15';
+const VER='1.16';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -384,13 +384,15 @@ function syncDrafts(){
   if(JSON.stringify([iv.items,iv.eids,iv.xids])!==was)ch.push(iv.num)});
  return ch}
 /* ---------- new invoice: pick days on a calendar ---------- */
-let PK=null; // {cl: client id or '' for no client, off: months from now, sel: Set of day keys}
+let PK=null; // {cl: client id or '' for no client, off: months from now, sel: Set of day keys, into: adding to the open invoice IV}
 const eCid=e=>(cliOfE(e)||{}).id||'';
 const xCid=x=>(cliOf((jobOf(x.jobId)||{}).clientId)||{}).id||'';
 // Uninvoiced work for the picked client, by day: entries, billable expenses, minutes and money.
 function pkData(cl){const C=calc(S.entries),D={},d=k=>D[k]=D[k]||{E:[],X:[],m:0,pay:0};
- S.entries.forEach(e=>{if(!e.inv&&eCid(e)===cl){const o=d(dayKey(e.start));o.E.push(e);o.m+=C[e.id].m;o.pay+=C[e.id].pay}});
- S.expenses.forEach(x=>{if(!x.inv&&xBill(x)&&xCid(x)===cl){const o=d(x.date);o.X.push(x);o.pay+=x.amt}});return D}
+ // when adding to the open invoice, leave out what it already holds (not yet marked if it isn't saved)
+ const on=PK&&PK.into?new Set([...IV.eids,...(IV.xids||[])]):new Set();
+ S.entries.forEach(e=>{if(!e.inv&&!on.has(e.id)&&eCid(e)===cl){const o=d(dayKey(e.start));o.E.push(e);o.m+=C[e.id].m;o.pay+=C[e.id].pay}});
+ S.expenses.forEach(x=>{if(!x.inv&&!on.has(x.id)&&xBill(x)&&xCid(x)===cl){const o=d(x.date);o.X.push(x);o.pay+=x.amt}});return D}
 const pkMonth=k=>{const n=new Date();return(+k.slice(0,4)-n.getFullYear())*12+(+k.slice(5,7)-1-n.getMonth())};
 function pickOpen(cl){
  const ids=[...new Set([...S.entries.filter(e=>!e.inv).map(eCid),...S.expenses.filter(x=>!x.inv&&xBill(x)).map(xCid)])];
@@ -398,9 +400,14 @@ function pickOpen(cl){
  ids.sort((a,b)=>!a-!b||cliOf(a).name.localeCompare(cliOf(b).name)); // named clients A-Z, then "No client"
  if(cl===undefined||!ids.includes(cl))cl=ids[0];
  PK={cl,ids,off:pkMonth(Object.keys(pkData(cl)).sort().pop()),sel:new Set()};pickM()}
+// Same picker, for adding more days to the draft invoice that is open.
+function pickAdd(){readIV();const cl=(cliOf(IV.clientId)||{}).id||'';PK={cl,ids:[cl],off:0,sel:new Set(),into:1};
+ const ks=Object.keys(pkData(cl));
+ if(!ks.length){PK=null;say('No unbilled work left for '+(cl?cliOf(cl).name:'projects without a client')+'.');return}
+ PK.off=pkMonth(ks.sort().pop());pickM()}
 function pickM(){
  const D=pkData(PK.cl),now=new Date(),ref=new Date(now.getFullYear(),now.getMonth()+PK.off,1),mo=ref.getMonth(),last=new Date(ref.getFullYear(),mo+1,0).getDate();
- const done={};S.entries.forEach(e=>{if(e.inv&&eCid(e)===PK.cl){const i=S.invoices.find(x=>x.id===e.inv);if(i)(done[dayKey(e.start)]=done[dayKey(e.start)]||[]).push(i.status)}});
+ const done={};S.entries.forEach(e=>{const mine=PK.into&&IV.eids.includes(e.id);if((e.inv||mine)&&eCid(e)===PK.cl){const i=mine?IV:S.invoices.find(x=>x.id===e.inv);if(i)(done[dayKey(e.start)]=done[dayKey(e.start)]||[]).push(i.status)}});
  const wd=[0,1,2,3,4,5,6].map(i=>['S','M','T','W','T','F','S'][(S.settings.weekStart+i)%7]),lead=(ref.getDay()-S.settings.weekStart+7)%7;
  let cells='<div></div>'.repeat(lead);
  for(let n=1;n<=last;n++){const k=ref.getFullYear()+'-'+p2(mo+1)+'-'+p2(n),o=D[k],dn=done[k];
@@ -408,15 +415,15 @@ function pickM(){
   :`<div class="cd pkd off${dn?' iv '+['draft','sent','paid'].find(x=>dn.includes(x)):''}"><span>${n}</span><b></b><u></u></div>`}
  const all=Object.values(D),tot=all.reduce((a,o)=>a+o.pay,0),sel=[...PK.sel].map(k=>D[k]).filter(Boolean),sm=sel.reduce((a,o)=>a+o.m,0),sp=sel.reduce((a,o)=>a+o.pay,0);
  const inMo=Object.keys(D).filter(k=>pkMonth(k)===PK.off),allOn=inMo.length&&inMo.every(k=>PK.sel.has(k));
- openM(`<h3>New invoice</h3>
- <label>Client<select id="pkc">${PK.ids.map(id=>`<option value="${id}" ${id===PK.cl?'selected':''}>${esc((cliOf(id)||{name:'No client'}).name)}</option>`).join('')}</select></label>
- <div class="muted" style="margin:-4px 0 10px">${money(tot)} not invoiced yet, over ${all.length} day${all.length===1?'':'s'}. Tap the days to bill.</div>
+ openM(`<h3>${PK.into?'Add days to '+esc(IV.num):'New invoice'}</h3>
+ ${PK.into?`<div style="margin-bottom:8px"><b>${esc((cliOf(PK.cl)||{name:'No client'}).name)}</b></div>`:`<label>Client<select id="pkc">${PK.ids.map(id=>`<option value="${id}" ${id===PK.cl?'selected':''}>${esc((cliOf(id)||{name:'No client'}).name)}</option>`).join('')}</select></label>`}
+ <div class="muted" style="margin:-4px 0 10px">${money(tot)} not invoiced yet, over ${all.length} day${all.length===1?'':'s'}. Tap the days to ${PK.into?'add':'bill'}.</div>
  <div class="cmh"><button data-a="pkPrev">‹</button><b>${ref.toLocaleDateString([],{month:'long',year:'numeric'})}</b><button data-a="pkNext">›</button></div>
  <div class="pkg">${wd.map(x=>`<div class="chd">${x}</div>`).join('')}</div><div class="pkg">${cells}</div>
  <div class="lg" style="margin:8px 0 10px"><span><i class="pk"></i>Selected</span><span><i class="paid"></i>Paid</span><span><i class="sent"></i>Sent</span><span><i class="draft"></i>Draft</span></div>
  <div class="row"><button data-a="pkAll" ${inMo.length?'':'disabled'}>${allOn?'Clear month':'Whole month'}</button><button data-a="pkEvery">Everything</button></div>
  <div class="between" style="margin:12px 2px"><b>${sel.length} day${sel.length===1?'':'s'} · ${hm(sm)} h</b><b>${money(sp)}</b></div>
- <div class="row"><button data-a="close">Cancel</button><button class="pri" data-a="pkGo" ${sel.length?'':'disabled'}>Create invoice</button></div>`)}
+ <div class="row"><button data-a="${PK.into?'fBack':'close'}">${PK.into?'Back':'Cancel'}</button><button class="pri" data-a="pkGo" ${sel.length?'':'disabled'}>${PK.into?'Add to invoice':'Create invoice'}</button></div>`)}
 function readIV(){const g=i=>$(i).value;
  Object.assign(IV,{clientId:g('#icl')||null,num:g('#in'),status:g('#is'),date:g('#id'),due:g('#iu'),client:g('#ic'),email:g('#ie'),addr:g('#ia'),tax:parseFloat(g('#it'))||0,notes:g('#inn'),pics:$('#ip').checked});
  document.querySelectorAll('[data-i]').forEach(el=>{const i=IV.items[el.dataset.i],k=el.dataset.k,v=k==='d'?el.value:(parseFloat(el.value)||0);
@@ -424,7 +431,9 @@ function readIV(){const g=i=>$(i).value;
   i[k]=v})}
 // Saves IV (a working copy) into the invoice list; a new invoice also claims its entries and number.
 function commitIV(){if(IV.status==='paid'){if(!IV.paidOn)IV.paidOn=dayKey(Date.now())}else delete IV.paidOn;
- if(IV.isNew){delete IV.isNew;S.entries.forEach(e=>{if(IV.eids.includes(e.id))e.inv=IV.id});S.expenses.forEach(x=>{if((IV.xids||[]).includes(x.id))x.inv=IV.id});S.biz.next++;S.invoices.push(JSON.parse(JSON.stringify(IV)))}
+ // claim the invoice's entries and expenses (all of them on a new invoice, newly added days on an existing one)
+ S.entries.forEach(e=>{if(IV.eids.includes(e.id))e.inv=IV.id});S.expenses.forEach(x=>{if((IV.xids||[]).includes(x.id))x.inv=IV.id});
+ if(IV.isNew){delete IV.isNew;S.biz.next++;S.invoices.push(JSON.parse(JSON.stringify(IV)))}
  else{S.invoices[S.invoices.findIndex(i=>i.id===IV.id)]=JSON.parse(JSON.stringify(IV));
   // lines removed from the invoice hand their entries and expenses back as not invoiced
   S.entries.forEach(e=>{if(e.inv===IV.id&&!(IV.eids||[]).includes(e.id))delete e.inv});S.expenses.forEach(x=>{if(x.inv===IV.id&&!(IV.xids||[]).includes(x.id))delete x.inv})}
@@ -451,7 +460,7 @@ function invM(){const T=tot(IV);
  <label>Client<select id="icl"><option value="">No client</option>${cliOpts(IV.clientId)}</select></label><label>Bill to<input id="ic" value="${esc(IV.client)}"></label><label>Client email<input id="ie" type="email" value="${esc(IV.email)}"></label>
  <label>Client address<textarea id="ia" rows="2">${esc(IV.addr)}</textarea></label><b>Line items</b>
  ${IV.items.map((i,n)=>`<div class="card" style="margin:8px 0"><input data-i="${n}" data-k="d" value="${esc(i.d)}">${IV.status==='draft'&&(i.e||i.x)?`<div class="muted" style="font-size:12px;margin:-6px 0 6px">${i.man?'Amount set by hand. It no longer follows your log.':'Follows your log while this is a draft.'}</div>`:''}<div class="row"><label>Hours / qty<input type="number" step="0.01" data-i="${n}" data-k="q" value="${i.q}"></label><label>Rate<input type="number" step="0.01" data-i="${n}" data-k="r" value="${i.r}"></label><button class="danger" data-a="ivDel" data-v="${n}" style="flex:0 0 auto">✕</button></div></div>`).join('')}
- <button data-a="ivAdd" style="width:100%;margin-bottom:10px">Add line</button>
+ ${IV.status==='draft'?`<div class="row" style="margin-bottom:10px"><button data-a="ivDays">Add more days</button><button data-a="ivAdd">Add blank line</button></div>`:`<button data-a="ivAdd" style="width:100%;margin-bottom:10px">Add line</button>`}
  <label>Tax (%)<input type="number" step="0.01" id="it" value="${IV.tax}"></label><label>Notes / payment details<textarea id="inn" rows="3">${esc(IV.notes)}</textarea></label>
  <label class="chk"><input type="checkbox" id="ip" ${IV.pics?'checked':''}>Add work and receipt photos to the PDF (${[...S.entries.filter(e=>(IV.eids||[]).includes(e.id)),...S.expenses.filter(x=>(IV.xids||[]).includes(x.id))].reduce((a,e)=>a+(e.photos||[]).length,0)} available)</label><div class="between"><b>Total</b><b>${money(T.g)}</b></div>
  <div class="row" style="margin-top:12px"><button data-a="close">Close</button><button class="pri" data-a="ivSave">Save</button></div>
@@ -797,7 +806,13 @@ const A={
  pkT(v){PK.sel.has(v)?PK.sel.delete(v):PK.sel.add(v);pickM()},
  pkAll(){const ks=Object.keys(pkData(PK.cl)).filter(k=>pkMonth(k)===PK.off),on=ks.every(k=>PK.sel.has(k));ks.forEach(k=>on?PK.sel.delete(k):PK.sel.add(k));pickM()},
  pkEvery(){Object.keys(pkData(PK.cl)).forEach(k=>PK.sel.add(k));pickM()},
+ ivDays(){pickAdd()},
  pkGo(){const D=pkData(PK.cl),ks=[...PK.sel].filter(k=>D[k]).sort();if(!ks.length)return;
+  if(PK.into){const C=calc(S.entries),L=ks.flatMap(k=>D[k].E).sort((a,b)=>a.start-b.start),X=ks.flatMap(k=>D[k].X);
+   L.forEach(e=>{const l=eLines(e,C[e.id]);if(l.r)IV.items.push(l.r);if(l.o)IV.items.push(l.o);IV.eids.push(e.id)});
+   X.forEach(x=>{IV.items.push(xLine(x));(IV.xids=IV.xids||[]).push(x.id)});
+   if([...L,...X].some(e=>(e.photos||[]).length))IV.pics=true;IV.lk=IV.lk||0;
+   PK=null;invM();say('Added '+ks.length+' day'+(ks.length===1?'':'s')+'. Save the invoice to keep them.');return}
   buildInv(ks.flatMap(k=>D[k].E).sort((a,b)=>a.start-b.start),ks.flatMap(k=>D[k].X),cliOf(PK.cl)||null)},
  nShare(){naSend(FM.f).then(()=>NA.share(FM.f.type,FM.title,FM.txt,FM.email)).catch(()=>say('Could not prepare the file.'))},
  nSave(){naSend(FM.f).then(()=>NA.save(FM.f.type)).catch(()=>say('Could not prepare the file.'))},
