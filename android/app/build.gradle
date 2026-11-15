@@ -1,0 +1,48 @@
+plugins { id 'com.android.application' }
+
+// The app is a thin shell around the live site, so web updates need no new APK.
+// -PsiteUrl, -Pvc and -Pvn are passed by .github/workflows/android.yml.
+def siteUrl = project.findProperty('siteUrl') ?: 'https://xxtragicmagicxx.github.io/Time-To-Sheet-My-Pants/'
+def ksFile = System.getenv('KS_FILE')
+
+android {
+    namespace 'io.github.xxtragicmagicxx.timesheet'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'io.github.xxtragicmagicxx.timesheet'
+        minSdk 24
+        // 34, not newer: 35 forces edge-to-edge, which would put the page under the status bar.
+        targetSdk 34
+        versionCode((project.findProperty('vc') ?: '1') as int)
+        versionName(project.findProperty('vn') ?: '1.0')
+        buildConfigField 'String', 'SITE_URL', "\"${siteUrl}\""
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            if (ksFile) {
+                storeFile file(ksFile)
+                storeType 'pkcs12'
+                storePassword System.getenv('KS_PASS')
+                keyAlias 'timesheet'
+                keyPassword System.getenv('KS_PASS')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksFile) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+}
+
+dependencies {
+    // Only for FileProvider (sharing files and camera photos).
+    implementation 'androidx.core:core:1.13.1'
+}
