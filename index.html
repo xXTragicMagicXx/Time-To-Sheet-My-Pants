@@ -69,6 +69,7 @@ button:disabled{opacity:.4}
 .phs{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px}.ph{position:relative;width:76px;height:76px}
 .ph img{width:100%;height:100%;object-fit:cover;border-radius:8px}.ph button{position:absolute;top:2px;right:2px;padding:0 6px;border-radius:99px;font-size:12px}
 .st{display:inline-block;border-radius:99px;padding:1px 9px;font-size:12px;font-weight:600;color:#fff}
+.right .st{display:table;margin:3px 0 0 auto}
 .st.paid{background:var(--go)}.st.draft{background:#e08a00}.st.sent{background:var(--stop)}
 .item.paid{box-shadow:inset 4px 0 var(--go);padding-left:10px}.item.draft{box-shadow:inset 4px 0 #e08a00;padding-left:10px}.item.sent{box-shadow:inset 4px 0 var(--stop);padding-left:10px}
 button.big.brk{background:var(--acc);color:var(--accink)}
@@ -82,18 +83,29 @@ a.btn.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);font
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.7';
+const VER='1.8';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
 const p2=n=>String(n).padStart(2,'0');
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-function def(){return{jobs:[{id:uid(),name:'General',rate:0,color:'#f2a900'}],entries:[],running:null,lastJob:null,invoices:[],biz:{name:'',info:'',pay:'',prefix:'INV-',next:1,terms:14,tax:0},
+function def(){return{jobs:[{id:uid(),name:'General',rate:0,color:'#f2a900',clientId:null}],clients:[],entries:[],running:null,lastJob:null,invoices:[],biz:{name:'',info:'',pay:'',prefix:'INV-',next:1,terms:14,tax:0},
  settings:{round:0,otDaily:0,otWeekly:0,otMult:1.5,weekStart:1,cur:'$',period:'weekly',anchor:'2024-01-01'}}}
-function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.jobs&&d.entries){const b=def();return Object.assign(b,d,{settings:Object.assign(b.settings,d.settings)})}}catch(e){}return def()}
+// Data saved before v1.8 kept client name/email/address on each project ("job").
+// Turn those into real clients (merging same-named ones) and link invoices to them by name.
+function migrate(D){
+ if(!Array.isArray(D.clients))D.clients=[];
+ const find=n=>D.clients.find(c=>c.name.toLowerCase()===n.toLowerCase());
+ D.jobs.forEach(j=>{if(j.clientId!==undefined)return;const n=(j.client||'').trim();j.clientId=null;
+  if(n){let c=find(n);if(!c){c={id:uid(),name:n,email:'',phone:'',addr:'',notes:''};D.clients.push(c)}
+   if(!c.email&&j.email)c.email=j.email;if(!c.addr&&j.addr)c.addr=j.addr;j.clientId=c.id}
+  delete j.client;delete j.email;delete j.addr});
+ D.invoices.forEach(i=>{if(i.clientId!==undefined)return;const c=i.client&&find(i.client.trim());i.clientId=c?c.id:null});
+ return D}
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.jobs&&d.entries){const b=def();return migrate(Object.assign(b,d,{settings:Object.assign(b.settings,d.settings)}))}}catch(e){}return def()}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
-let S=load(),tab='timer',off=0,cOff=0,IV=null,EP=[],curE=null,F={job:'',tag:'',from:'',to:'',q:'',st:'all'};
+let S=load(),selC=null,tab='timer',off=0,cOff=0,IV=null,EP=[],curE=null,F={job:'',cl:'',tag:'',from:'',to:'',q:'',st:'all'};
 
 /* ---------- helpers ---------- */
 const dayKey=ms=>{const d=new Date(ms);return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())};
@@ -104,6 +116,8 @@ const hm=m=>{m=Math.round(m);return Math.floor(m/60)+':'+p2(m%60)};
 const hms=ms=>{const s=Math.floor(ms/1000);return p2(Math.floor(s/3600))+':'+p2(Math.floor(s%3600/60))+':'+p2(s%60)};
 const money=v=>S.settings.cur+v.toFixed(2);
 const jobOf=id=>S.jobs.find(j=>j.id===id);
+const cliOf=id=>id?S.clients.find(c=>c.id===id):null;
+const cliOfE=e=>{const j=jobOf(e.jobId);return j?cliOf(j.clientId):null};
 function wkStart(ms){const d=new Date(ms);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()-S.settings.weekStart+7)%7));return d}
 
 /* ---------- calculations ---------- */
@@ -135,12 +149,13 @@ function range(o){
 const rLabel=r=>{const f=x=>new Date(x).toLocaleDateString([],{month:'short',day:'numeric'});return f(r[0])+' – '+f(r[1]-864e5)};
 
 /* ---------- views ---------- */
-const TABS=[['timer','Timer','⏱'],['cal','Calendar','📅'],['log','Log','☰'],['inv','Invoices','🧾'],['sum','Summary','📊'],['set','Settings','⚙']];
+const TABS=[['timer','Timer','⏱'],['cal','Calendar','📅'],['log','Log','☰'],['inv','Invoices','🧾'],['cli','Clients','👥'],['sum','Summary','📊'],['set','Settings','⚙']];
 function render(){
  $('#nav').innerHTML=TABS.map(t=>`<button data-a="tab" data-v="${t[0]}" class="${tab===t[0]?'on':''}"><span>${t[2]}</span>${t[1]}</button>`).join('');
- $('#main').innerHTML=({timer:vTimer,cal:vCal,log:vLog,inv:vInv,sum:vSum,set:vSet})[tab]();
+ $('#main').innerHTML=({timer:vTimer,cal:vCal,log:vLog,inv:vInv,cli:vCli,sum:vSum,set:vSet})[tab]();
 }
-const jobOpts=sel=>S.jobs.map(j=>`<option value="${j.id}" ${j.id===sel?'selected':''}>${esc(j.name)}</option>`).join('');
+const jobOpts=sel=>S.jobs.map(j=>{const c=cliOf(j.clientId);return`<option value="${j.id}" ${j.id===sel?'selected':''}>${esc(j.name)}${c?' · '+esc(c.name):''}</option>`}).join('');
+const cliOpts=sel=>[...S.clients].sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.name)}</option>`).join('');
 
 const workMs=r=>(r.brkStart||Date.now())-r.start-r.brkMs;
 function vTimer(){
@@ -186,42 +201,47 @@ const parseTags=x=>[...new Set(String(x).split(/[,\s]+/).map(t=>t.replace(/^#/,'
 const allTags=()=>[...new Set(S.entries.flatMap(e=>e.tags||[]))].sort();
 const tagChips=t=>allTags().map(x=>`<span class="tag" data-a="addTag" data-v="${esc(x)}" data-t="${t}">#${esc(x)}</span>`).join('');
 function filt(){const q=F.q.toLowerCase();return S.entries.filter(e=>{const j=jobOf(e.jobId),k=dayKey(e.start);
- return(!F.job||e.jobId===F.job)&&(!F.tag||(e.tags||[]).includes(F.tag))&&(!F.from||k>=F.from)&&(!F.to||k<=F.to)&&(F.st==='all'||(F.st==='open')===!e.inv)&&
- (!q||((e.note||'')+' '+(j?j.name+' '+(j.client||''):'')+' '+(e.tags||[]).join(' ')).toLowerCase().includes(q))}).sort((a,b)=>b.start-a.start)}
+ const c=cliOfE(e);
+ return(!F.job||e.jobId===F.job)&&(!F.cl||(F.cl==='none'?!c:!!c&&c.id===F.cl))&&(!F.tag||(e.tags||[]).includes(F.tag))&&(!F.from||k>=F.from)&&(!F.to||k<=F.to)&&(F.st==='all'||(F.st==='open')===!e.inv)&&
+ (!q||((e.note||'')+' '+(j?j.name:'')+' '+(c?c.name:'')+' '+(e.tags||[]).join(' ')).toLowerCase().includes(q))}).sort((a,b)=>b.start-a.start)}
 function resHtml(){const L=filt(),C=calc(S.entries),t=sum(L,C),days={};
  L.forEach(e=>(days[dayKey(e.start)]=days[dayKey(e.start)]||[]).push(e));
  return`<div class="stats"><div class="card stat"><span class="muted">${L.length} entries</span><b>${hm(t.m)}</b></div><div class="card stat"><span class="muted">Earnings</span><b>${money(t.pay)}</b></div></div>
  <div class="row" style="margin-bottom:6px"><button class="pri" data-a="mkInv" ${L.length?'':'disabled'}>Create invoice</button><button data-a="csvF" ${L.length?'':'disabled'}>Export CSV</button></div>`+
  (Object.keys(days).map(k=>{const D=days[k],d=sum(D,C);return`<div class="dayh"><span>${dStr(D[0].start)}</span><span>${hm(d.m)} · ${money(d.pay)}</span></div><div class="card" style="padding:4px 14px">`+
   D.map(e=>{const j=jobOf(e.jobId),c=C[e.id];
-   return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted job')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.brk?`, ${e.brk}m break`:''}${e.note?`<br>${esc(e.note)}`:''}</div>${(e.tags||[]).map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}${(e.photos||[]).length?`<span class="tag">📷 ${e.photos.length}</span>`:''}${e.inv?'<span class="tag">invoiced</span>':''}</div>
+   return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted project')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.brk?`, ${e.brk}m break`:''}${e.note?`<br>${esc(e.note)}`:''}</div>${(e.tags||[]).map(t=>`<span class="tag">#${esc(t)}</span>`).join('')}${(e.photos||[]).length?`<span class="tag">📷 ${e.photos.length}</span>`:''}${e.inv?'<span class="tag">invoiced</span>':''}</div>
    <div class="right">${hm(c.m)}<div class="muted">${c.o?hm(c.o)+' OT':money(c.pay)}</div></div></div>`}).join('')+`</div>`}).join('')||'<div class="card muted center">No matching entries.</div>')}
 function vLog(){
  return`<h2>Log</h2><div class="card"><input data-f="q" placeholder="Search notes, clients, tags" value="${esc(F.q)}">
- <div class="row"><select data-f="job"><option value="">All jobs</option>${jobOpts(F.job)}</select><select data-f="tag"><option value="">All tags</option>${allTags().map(t=>`<option ${t===F.tag?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
+ <div class="row"><select data-f="cl"><option value="">All clients</option>${cliOpts(F.cl)}<option value="none" ${F.cl==='none'?'selected':''}>No client</option></select><select data-f="job"><option value="">All projects</option>${jobOpts(F.job)}</select></div><div class="row"><select data-f="tag"><option value="">All tags</option>${allTags().map(t=>`<option ${t===F.tag?'selected':''}>${esc(t)}</option>`).join('')}</select></div>
  <div class="row"><input type="date" data-f="from" value="${F.from}"><input type="date" data-f="to" value="${F.to}"></div>
- <div class="row"><select data-f="st">${[['all','All entries'],['open','Not invoiced'],['billed','Invoiced']].map(x=>`<option value="${x[0]}" ${F.st===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select><button data-a="clrF">Clear filters</button></div></div>
+ <div class="row" style="margin-top:0"><select data-f="st">${[['all','All entries'],['open','Not invoiced'],['billed','Invoiced']].map(x=>`<option value="${x[0]}" ${F.st===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select><button data-a="clrF">Clear filters</button></div></div>
  <div id="res">${resHtml()}</div><button class="fab" data-a="addE">+</button>`}
 
 /* ---------- invoices ---------- */
 const tot=iv=>{const s=iv.items.reduce((a,i)=>a+i.q*i.r,0),t=s*iv.tax/100;return{s,t,g:s+t}};
+const ST={draft:'Draft',sent:'Sent, unpaid',paid:'Paid'};
+const invRow=i=>`<div class="item ${i.status}" data-a="openI" data-v="${i.id}"><div>${esc(i.num)}<div class="muted">${esc(i.client||(cliOf(i.clientId)||{}).name||'')} · ${i.date}</div></div><div class="right">${money(tot(i).g)}<span class="st ${i.status}">${ST[i.status]}</span></div></div>`;
 function vInv(){
  const L=[...S.invoices].sort((a,b)=>b.date.localeCompare(a.date)),out=L.filter(i=>i.status==='sent').reduce((a,i)=>a+tot(i).g,0);
  return`<h2>Invoices</h2><div class="card stat"><span class="muted">Sent, awaiting payment</span><b style="color:var(--stop)">${money(out)}</b></div>`+
- (L.length?`<div class="card" style="padding:4px 14px">`+L.map(i=>`<div class="item ${i.status}" data-a="openI" data-v="${i.id}"><div>${esc(i.num)}<div class="muted">${esc(i.client)} · ${i.date}</div></div><div class="right">${money(tot(i).g)}<span class="st ${i.status}">${({draft:"Draft",sent:"Sent, unpaid",paid:"Paid"})[i.status]}</span></div></div>`).join('')+`</div>`
- :`<div class="card muted center">No invoices yet. In the Log tab, filter to a job and date range, then tap Create invoice.</div>`)}
+ (L.length?`<div class="card" style="padding:4px 14px">`+L.map(invRow).join('')+`</div>`
+ :`<div class="card muted center">No invoices yet. In the Log tab, filter to a client or project and a date range, then tap Create invoice.</div>`)}
 function mkInv(){
  const L=filt().filter(e=>!e.inv).reverse();
  if(!L.length){say('These entries are already invoiced. Set the filter to "Not invoiced".');return}
- const C=calc(S.entries),b=S.biz,items=[],j0=jobOf(L[0].jobId)||{};
+ const cs=[...new Set(L.map(e=>(cliOfE(e)||{}).id||''))];
+ if(cs.length>1){say('These entries belong to more than one client. Filter the Log to one client first.');return}
+ const cl=cliOf(cs[0]),C=calc(S.entries),b=S.biz,items=[];
  L.forEach(e=>{const c=C[e.id],j=jobOf(e.jobId)||{name:'Work',rate:0},d=dStr(e.start)+', '+j.name+(e.note?': '+e.note:'');
   if(c.r>0)items.push({d,q:+(c.r/60).toFixed(2),r:j.rate});
   if(c.o>0)items.push({d:d+' (overtime)',q:+(c.o/60).toFixed(2),r:+(j.rate*S.settings.otMult).toFixed(2)})});
  const due=new Date();due.setDate(due.getDate()+b.terms);
- IV={id:uid(),num:b.prefix+String(b.next).padStart(3,'0'),date:dayKey(Date.now()),due:dayKey(+due),client:j0.client||j0.name||'',email:j0.email||'',addr:j0.addr||'',notes:b.pay||'',tax:b.tax,status:'draft',items,eids:L.map(e=>e.id),pics:L.some(e=>(e.photos||[]).length>0),isNew:true};
+ IV={id:uid(),num:b.prefix+String(b.next).padStart(3,'0'),date:dayKey(Date.now()),due:dayKey(+due),clientId:cl?cl.id:null,client:cl?cl.name:'',email:cl?cl.email:'',addr:cl?cl.addr:'',notes:b.pay||'',tax:b.tax,status:'draft',items,eids:L.map(e=>e.id),pics:L.some(e=>(e.photos||[]).length>0),isNew:true};
  invM()}
 function readIV(){const g=i=>$(i).value;
- Object.assign(IV,{num:g('#in'),status:g('#is'),date:g('#id'),due:g('#iu'),client:g('#ic'),email:g('#ie'),addr:g('#ia'),tax:parseFloat(g('#it'))||0,notes:g('#inn'),pics:$('#ip').checked});
+ Object.assign(IV,{clientId:g('#icl')||null,num:g('#in'),status:g('#is'),date:g('#id'),due:g('#iu'),client:g('#ic'),email:g('#ie'),addr:g('#ia'),tax:parseFloat(g('#it'))||0,notes:g('#inn'),pics:$('#ip').checked});
  document.querySelectorAll('[data-i]').forEach(el=>{const i=IV.items[el.dataset.i],k=el.dataset.k;i[k]=k==='d'?el.value:(parseFloat(el.value)||0)})}
 // Saves IV (a working copy) into the invoice list; a new invoice also claims its entries and number.
 function commitIV(){if(IV.isNew){delete IV.isNew;S.entries.forEach(e=>{if(IV.eids.includes(e.id))e.inv=IV.id});S.biz.next++;S.invoices.push(JSON.parse(JSON.stringify(IV)))}
@@ -230,7 +250,7 @@ function invM(){const T=tot(IV);
  openM(`<h3>${IV.isNew?'New invoice':'Invoice '+esc(IV.num)}</h3>
  <div class="row"><label>Number<input id="in" value="${esc(IV.num)}"></label><label>Status<select id="is">${['draft','sent','paid'].map(x=>`<option ${IV.status===x?'selected':''}>${x}</option>`).join('')}</select></label></div>
  <div class="row"><label>Date<input type="date" id="id" value="${IV.date}"></label><label>Due<input type="date" id="iu" value="${IV.due}"></label></div>
- <label>Bill to<input id="ic" value="${esc(IV.client)}"></label><label>Client email<input id="ie" type="email" value="${esc(IV.email)}"></label>
+ <label>Client<select id="icl"><option value="">No client</option>${cliOpts(IV.clientId)}</select></label><label>Bill to<input id="ic" value="${esc(IV.client)}"></label><label>Client email<input id="ie" type="email" value="${esc(IV.email)}"></label>
  <label>Client address<textarea id="ia" rows="2">${esc(IV.addr)}</textarea></label><b>Line items</b>
  ${IV.items.map((i,n)=>`<div class="card" style="margin:8px 0"><input data-i="${n}" data-k="d" value="${esc(i.d)}"><div class="row"><label>Hours / qty<input type="number" step="0.01" data-i="${n}" data-k="q" value="${i.q}"></label><label>Rate<input type="number" step="0.01" data-i="${n}" data-k="r" value="${i.r}"></label><button class="danger" data-a="ivDel" data-v="${n}" style="flex:0 0 auto">✕</button></div></div>`).join('')}
  <button data-a="ivAdd" style="width:100%;margin-bottom:10px">Add line</button>
@@ -263,9 +283,9 @@ function parseCSV(t){const R=[];let r=[],f='',q=false;
   else if(c=='"')q=true;else if(c==','){r.push(f);f=''}
   else if(c=='\n'||c=='\r'){if(c=='\r'&&t[i+1]=='\n')i++;r.push(f);f='';if(r.some(x=>x.trim()))R.push(r);r=[]}else f+=c}
  r.push(f);if(r.some(x=>x.trim()))R.push(r);return R}
-const HX={date:/date|day/i,start:/start|clock.?in|^in$|from|begin/i,end:/end|clock.?out|^out$|finish|stop/i,dur:/dur|hours|hrs|total|elapsed/i,brk:/break/i,job:/job|project|client|customer/i,note:/note|desc|memo|comment|task|detail/i,tags:/tag|label/i};
-const FL=[['date','Date'],['start','Start time'],['end','End time'],['dur','Duration (hours)'],['brk','Break (minutes)'],['job','Job / client'],['note','Notes'],['tags','Tags']];
-function guess(h){const m={},u=new Set();['start','end','brk','date','dur','job','note','tags'].forEach(k=>{const i=h.findIndex((x,n)=>!u.has(n)&&HX[k].test(x));if(i>=0){m[k]=i;u.add(i)}});return m}
+const HX={date:/date|day/i,start:/start|clock.?in|^in$|from|begin/i,end:/end|clock.?out|^out$|finish|stop/i,dur:/dur|hours|hrs|total|elapsed/i,brk:/break/i,job:/job|project/i,client:/client|customer|company/i,note:/note|desc|memo|comment|task|detail/i,tags:/tag|label/i};
+const FL=[['date','Date'],['start','Start time'],['end','End time'],['dur','Duration (hours)'],['brk','Break (minutes)'],['job','Project'],['client','Client'],['note','Notes'],['tags','Tags']];
+function guess(h){const m={},u=new Set();['start','end','brk','date','dur','job','client','note','tags'].forEach(k=>{const i=h.findIndex((x,n)=>!u.has(n)&&HX[k].test(x));if(i>=0){m[k]=i;u.add(i)}});return m}
 function parseDate(s){s=(s||'').trim();let m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);if(m)return new Date(+m[1],m[2]-1,+m[3]);
  m=s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);if(m){let a=+m[1],b=+m[2],y=+m[3];if(y<100)y+=2000;return a>12?new Date(y,b-1,a):new Date(y,a-1,b)}
  const t=Date.parse(s);if(t){const d=new Date(t);return new Date(d.getFullYear(),d.getMonth(),d.getDate())}return null}
@@ -284,16 +304,19 @@ function rowToEntry(r,M){
 const pv=()=>{const e=rowToEntry(IMP.rows[0],IMP.M);return e?'First row reads as: '+dStr(e.start)+', '+tStr(e.start)+' to '+tStr(e.end)+(e.brk?', '+e.brk+'m break':''):'First row could not be read with these columns.'};
 function impM(){openM(`<h3>Import from CSV</h3><div class="muted" style="margin-bottom:8px">${IMP.rows.length} rows found. Check that each field points at the right column.</div>
  ${FL.map(x=>`<label>${x[1]}<select data-m="${x[0]}"><option value="-1">(none)</option>${IMP.head.map((h,i)=>`<option value="${i}" ${IMP.M[x[0]]===i?'selected':''}>${esc(h)}</option>`).join('')}</select></label>`).join('')}
- <label>Job for rows without a job<select id="imj">${jobOpts(S.lastJob)}</select></label><div class="muted" id="ipv" style="margin-bottom:10px">${pv()}</div>
+ <label>Project for rows without one<select id="imj">${jobOpts(S.lastJob)}</select></label><div class="muted" id="ipv" style="margin-bottom:10px">${pv()}</div>
  <div class="row"><button data-a="close">Cancel</button><button class="pri" data-a="doImp">Import</button></div>`)}
 function doImport(){
- const M=IMP.M,dj=$('#imj').value,pal=['#1f8f5f','#3b82c9','#c93b8c','#8a5cd6','#e08a00','#2aa7a7'],seen=new Set(S.entries.map(e=>e.jobId+'|'+e.start+'|'+e.end));let ok=0,sk=0,dup=0;
+ const M=IMP.M,dj=$('#imj').value,pal=['#1f8f5f','#3b82c9','#c93b8c','#8a5cd6','#e08a00','#2aa7a7'],seen=new Set(S.entries.map(e=>e.jobId+'|'+e.start+'|'+e.end));let ok=0,sk=0,dup=0,np=0,nc=0;
  IMP.rows.forEach(r=>{const e=rowToEntry(r,M);if(!e){sk++;return}
-  const nm=M.job>=0?(r[M.job]||'').trim():'';let j=nm?S.jobs.find(x=>x.name.toLowerCase()===nm.toLowerCase()):jobOf(dj);
-  if(!j){j={id:uid(),name:nm,rate:0,color:pal[S.jobs.length%6],client:nm,email:'',addr:''};S.jobs.push(j)}
+  const g=k=>M[k]>=0?(r[M[k]]||'').trim():'',nm=g('job'),cn=g('client');
+  let c=null;if(cn){c=S.clients.find(x=>x.name.toLowerCase()===cn.toLowerCase());if(!c){c=newCli(cn);nc++}}
+  // Same-named projects for different clients stay separate; a row with only a client goes to that client's first project.
+  let j=nm?S.jobs.find(x=>x.name.toLowerCase()===nm.toLowerCase()&&(!c||x.clientId===c.id)):c?S.jobs.find(x=>x.clientId===c.id):jobOf(dj);
+  if(!j){j={id:uid(),name:nm||c.name,rate:0,color:pal[S.jobs.length%6],clientId:c?c.id:null};S.jobs.push(j);np++}
   const k=j.id+'|'+e.start+'|'+e.end;if(seen.has(k)){dup++;return}seen.add(k);
   S.entries.push(Object.assign({id:uid(),jobId:j.id},e));ok++});
- save();closeM();render();say('Imported '+ok+' entries. Skipped '+sk+' unreadable rows and '+dup+' duplicates. Any new jobs have a rate of 0, so set their rates in Settings.')}
+ save();closeM();render();say('Imported '+ok+' entries. Skipped '+sk+' unreadable rows and '+dup+' duplicates.'+(nc?' Added '+nc+' clients.':'')+(np?' Added '+np+' projects with a rate of 0, so set their rates in Settings.':''))}
 const loadPdf=()=>window.jspdf?Promise.resolve():new Promise((ok,no)=>{const x=document.createElement('script');x.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';x.onload=ok;x.onerror=no;document.head.appendChild(x)});
 async function makePdf(){
  readIV();await loadPdf();
@@ -312,6 +335,7 @@ async function makePdf(){
 
 function vSum(){
  const C=calc(S.entries),r=range(off),L=S.entries.filter(e=>e.start>=r[0]&&e.start<r[1]),t=sum(L,C);
+ const byCli=S.clients.length?[...S.clients.map(c=>({n:c.name,id:c.id})),{n:'No client',id:null}].map(x=>({n:x.n,t:sum(L.filter(e=>((cliOfE(e)||{}).id||null)===x.id),C)})).filter(x=>x.t.m>0):[];
  const byJob=S.jobs.map(j=>({j,t:sum(L.filter(e=>e.jobId===j.id),C)})).filter(x=>x.t.m>0);
  const n=Math.round((r[1]-r[0])/864e5),per=[];
  for(let i=0;i<n;i++){const d=new Date(r[0]);d.setDate(d.getDate()+i);const k=dayKey(+d);per.push({d:d.getDate(),m:sum(L.filter(e=>dayKey(e.start)===k),C).m})}
@@ -321,14 +345,15 @@ function vSum(){
  <div class="stats"><div class="card stat"><span class="muted">Total hours</span><b>${hm(t.m)}</b></div><div class="card stat"><span class="muted">Earnings</span><b>${money(t.pay)}</b></div>
  <div class="card stat"><span class="muted">Regular</span><b>${hm(t.r)}</b></div><div class="card stat"><span class="muted">Overtime</span><b>${hm(t.o)}</b></div></div>
  <div class="card"><b>Hours per day</b><div class="bars">${per.map(x=>`<div><i style="height:${x.m/mx*100*0.8}%"></i>${n<=16?x.d:''}</div>`).join('')}</div></div>
- <div class="card"><b>By job</b>${byJob.length?byJob.map(x=>`<div class="item" style="cursor:default"><span><span class="dot" style="background:${x.j.color}"></span>${esc(x.j.name)}</span><span class="right">${hm(x.t.m)} · ${money(x.t.pay)}</span></div>`).join(''):'<div class="muted">Nothing tracked in this period.</div>'}</div>
+ ${byCli.length?`<div class="card"><b>By client</b>${byCli.map(x=>`<div class="item" style="cursor:default"><span>${esc(x.n)}</span><span class="right">${hm(x.t.m)} · ${money(x.t.pay)}</span></div>`).join('')}</div>`:''}
+ <div class="card"><b>By project</b>${byJob.length?byJob.map(x=>`<div class="item" style="cursor:default"><span><span class="dot" style="background:${x.j.color}"></span>${esc(x.j.name)}</span><span class="right">${hm(x.t.m)} · ${money(x.t.pay)}</span></div>`).join(''):'<div class="muted">Nothing tracked in this period.</div>'}</div>
  <button class="pri" style="width:100%" data-a="csvP">Export this period (CSV)</button>`}
 
 function vSet(){const s=S.settings;
  const num=(k,l,step)=>`<label>${l}<input type="number" min="0" step="${step||1}" data-s="${k}" value="${s[k]}"></label>`;
  return`<h2>Settings</h2>
- <div class="card"><div class="between"><b>Jobs and rates</b><button data-a="addJ">Add</button></div>
- ${S.jobs.map(j=>`<div class="item" data-a="editJ" data-v="${j.id}"><span><span class="dot" style="background:${j.color}"></span>${esc(j.name)}</span><span class="right">${money(j.rate)}/h</span></div>`).join('')}</div>
+ <div class="card"><div class="between"><b>Projects and rates</b><button data-a="addJ">Add</button></div>
+ ${S.jobs.map(j=>`<div class="item" data-a="editJ" data-v="${j.id}"><div><span class="dot" style="background:${j.color}"></span>${esc(j.name)}${cliOf(j.clientId)?`<div class="muted">${esc(cliOf(j.clientId).name)}</div>`:''}</div><span class="right">${money(j.rate)}/h</span></div>`).join('')}</div>
  <div class="card"><b>Pay rules</b><br><br>
  <label>Round time to<select data-s="round" data-n="1">${[0,3,5,6,10,15,30,60].map(v=>`<option value="${v}" ${s.round===v?'selected':''}>${v?v+' minutes':'No rounding'}</option>`).join('')}</select></label>
  ${num('otDaily','Daily overtime after (hours, 0 = off)',0.5)}${num('otWeekly','Weekly overtime after (hours, 0 = off)',0.5)}${num('otMult','Overtime pay multiplier',0.25)}
@@ -357,7 +382,7 @@ const closeM=()=>$('#modal').classList.remove('open');
 function entryM(id,day,fin){EP=id?[...(S.entries.find(x=>x.id===id).photos||[])]:[];curE=id||null;
  const e=id?S.entries.find(x=>x.id===id):{jobId:S.lastJob||S.jobs[0].id,start:day?new Date(day+'T09:00').getTime():Date.now()-36e5,end:day?new Date(day+'T17:00').getTime():Date.now(),brk:0,note:''};
  openM(`<h3>${fin?'Nice work. Add the details':id?'Edit entry':'Add entry'}</h3>
- <label>Job<select id="mj">${jobOpts(e.jobId)}</select></label>
+ <label>Project<select id="mj">${jobOpts(e.jobId)}</select></label>
  <label>Start<input type="datetime-local" id="ms" value="${toLocal(e.start)}"></label>
  <label>End<input type="datetime-local" id="me" value="${toLocal(e.end)}"></label>
  <label>Break (minutes)<input type="number" min="0" id="mb" value="${e.brk||0}"></label>
@@ -368,22 +393,67 @@ function dayM(k){
  const C=calc(S.entries),L=S.entries.filter(e=>dayKey(e.start)===k).sort((a,b)=>a.start-b.start),t=sum(L,C);
  openM(`<h3>${dStr(new Date(k+'T00:00').getTime())}</h3>
  <div class="muted" style="margin-bottom:8px">${hm(t.m)} hours, ${money(t.pay)}</div>
- ${L.length?L.map(e=>{const j=jobOf(e.jobId),c=C[e.id];return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted job')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.note?`<br>${esc(e.note)}`:''}</div></div><div class="right">${hm(c.m)}<div class="muted">${money(c.pay)}</div></div></div>`}).join(''):'<div class="muted">No entries on this day.</div>'}
+ ${L.length?L.map(e=>{const j=jobOf(e.jobId),c=C[e.id];return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted project')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.note?`<br>${esc(e.note)}`:''}</div></div><div class="right">${hm(c.m)}<div class="muted">${money(c.pay)}</div></div></div>`}).join(''):'<div class="muted">No entries on this day.</div>'}
  <div class="row" style="margin-top:14px"><button data-a="close">Close</button><button class="pri" data-a="addD" data-v="${k}">Add entry</button></div>`)}
 
-function jobM(id){
- const j=id?jobOf(id):{name:'',rate:0,color:'#f2a900',client:'',email:'',addr:''};
- openM(`<h3>${id?'Edit job':'Add job'}</h3>
+function jobM(id,cid){
+ const j=id?jobOf(id):{name:'',rate:0,color:'#f2a900',clientId:cid||null};
+ openM(`<h3>${id?'Edit project':'Add project'}</h3>
  <label>Name<input id="jn" value="${esc(j.name)}"></label>
+ <label>Client<select id="jl"><option value="">No client</option>${cliOpts(j.clientId)}</select></label>${S.clients.length?'':'<div class="muted" style="margin:-6px 0 10px">Add clients in the Clients tab.</div>'}
  <label>Hourly rate<input type="number" min="0" step="0.01" id="jr" value="${j.rate}"></label>
- <label>Client name (for invoices)<input id="jl" value="${esc(j.client)}"></label><label>Client email<input id="jm" type="email" value="${esc(j.email)}"></label><label>Client address<textarea id="ja" rows="2">${esc(j.addr)}</textarea></label><label>Color<input type="color" id="jc" value="${j.color}"></label>
+ <label>Color<input type="color" id="jc" value="${j.color}"></label>
  <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delJ" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveJ" data-v="${id||''}">Save</button></div>`)}
+
+function cliM(id){const c=id?cliOf(id):{name:'',email:'',phone:'',addr:'',notes:''};
+ openM(`<h3>${id?'Edit client':'Add client'}</h3>
+ <label>Name<input id="cn" value="${esc(c.name)}"></label>
+ <label>Email<input id="ce" type="email" value="${esc(c.email)}"></label>
+ <label>Phone<input id="cp" type="tel" value="${esc(c.phone)}"></label>
+ <label>Address<textarea id="ca" rows="2">${esc(c.addr)}</textarea></label>
+ <label>Notes<textarea id="co" rows="2">${esc(c.notes)}</textarea></label>
+ <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delC" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveC" data-v="${id||''}">Save</button></div>`)}
+
+/* ---------- clients ---------- */
+function newCli(n){const c={id:uid(),name:n,email:'',phone:'',addr:'',notes:''};S.clients.push(c);return c}
+// Money picture for one client, or (id null) for projects that have no client.
+function cliStats(id){
+ const C=calc(S.entries),js=S.jobs.filter(j=>(j.clientId||null)===id),ids=new Set(js.map(j=>j.id)),E=S.entries.filter(e=>ids.has(e.jobId));
+ const inv=S.invoices.filter(i=>(i.clientId||null)===id),by=st=>inv.filter(i=>i.status===st).reduce((a,i)=>a+tot(i).g,0),today=dayKey(Date.now());
+ return{C,js,E,inv,all:sum(E,C),open:sum(E.filter(e=>!e.inv),C),paid:by('paid'),sent:by('sent'),draft:by('draft'),od:inv.filter(i=>i.status==='sent'&&i.due&&i.due<today).length}}
+function vCli(){
+ if(selC)return vCliOne();
+ const rows=[...S.clients].sort((a,b)=>a.name.localeCompare(b.name)).map(c=>({id:c.id,n:c.name,s:cliStats(c.id)})),nc=cliStats(null);
+ if(nc.E.length||nc.inv.length)rows.push({id:'none',n:'Projects without a client',s:nc});
+ const T=rows.reduce((a,r)=>({paid:a.paid+r.s.paid,sent:a.sent+r.s.sent,open:a.open+r.s.open.pay}),{paid:0,sent:0,open:0});
+ return`<h2>Clients</h2>
+ <div class="stats"><div class="card stat"><span class="muted">Paid</span><b style="color:var(--go)">${money(T.paid)}</b></div><div class="card stat"><span class="muted">Sent, unpaid</span><b style="color:var(--stop)">${money(T.sent)}</b></div></div>
+ <div class="card stat"><span class="muted">Worked, not invoiced yet</span><b>${money(T.open)}</b></div>
+ ${rows.length?`<div class="card" style="padding:4px 14px">${rows.map(r=>`<div class="item" data-a="cli" data-v="${r.id}"><div>${esc(r.n)}<div class="muted">${r.s.js.length} project${r.s.js.length===1?'':'s'} · ${hm(r.s.all.m)} h</div></div><div class="right">${r.s.sent?`<span style="color:var(--stop)">${money(r.s.sent)} unpaid</span>`:''}<div class="muted">${money(r.s.paid)} paid</div></div></div>`).join('')}</div>`
+ :'<div class="card muted center">No clients yet. Tap + to add one, then add their projects.</div>'}
+ <button class="fab" data-a="addC">+</button>`}
+function vCliOne(){
+ const c=selC==='none'?null:cliOf(selC);if(selC!=='none'&&!c){selC=null;return vCli()}
+ const s=cliStats(c?c.id:null),inv=[...s.inv].sort((a,b)=>b.date.localeCompare(a.date));
+ const pj=s.js.map(j=>{const E=s.E.filter(e=>e.jobId===j.id);return{j,t:sum(E,s.C),o:sum(E.filter(e=>!e.inv),s.C)}});
+ return`<div class="between"><button data-a="cliBack">‹ Clients</button>${c?`<button data-a="editC" data-v="${c.id}">Edit client</button>`:''}</div>
+ <h2 style="margin-top:12px">${esc(c?c.name:'Projects without a client')}</h2>
+ ${c&&(c.email||c.phone||c.addr||c.notes)?`<div class="muted" style="margin:-6px 0 12px">${[c.email,c.phone,c.addr,c.notes].filter(Boolean).map(esc).join('<br>')}</div>`:''}
+ <div class="stats">
+  <div class="card stat"><span class="muted">Paid</span><b style="color:var(--go)">${money(s.paid)}</b></div>
+  <div class="card stat"><span class="muted">Sent, unpaid</span><b style="color:var(--stop)">${money(s.sent)}</b>${s.od?`<span class="muted">${s.od} overdue</span>`:''}</div>
+  <div class="card stat"><span class="muted">Drafts</span><b>${money(s.draft)}</b></div>
+  <div class="card stat"><span class="muted">Not invoiced yet</span><b>${money(s.open.pay)}</b><span class="muted">${hm(s.open.m)} h</span></div></div>
+ <div class="card"><div class="between" style="margin-bottom:4px"><b>Projects</b>${c?`<button data-a="addJc" data-v="${c.id}">Add project</button>`:''}</div>
+ ${pj.length?pj.map(x=>`<div class="item" data-a="editJ" data-v="${x.j.id}"><div><span class="dot" style="background:${x.j.color}"></span>${esc(x.j.name)}<div class="muted">${money(x.j.rate)}/h · ${hm(x.t.m)} h</div></div><div class="right">${money(x.t.pay)}<div class="muted">${x.o.m?money(x.o.pay)+' not invoiced':x.t.m?'all invoiced':''}</div></div></div>`).join(''):'<div class="muted">No projects yet.</div>'}</div>
+ <div class="card" style="padding:14px 14px 4px"><b>Invoices</b>${inv.length?inv.map(invRow).join(''):'<div class="muted" style="padding-bottom:10px">No invoices yet.</div>'}</div>
+ ${s.open.m?`<button class="pri" style="width:100%" data-a="cliLog">See uninvoiced work in the Log</button>`:''}`}
 
 /* ---------- export ---------- */
 function csv(list){
- const C=calc(S.entries),rows=[['Date','Job','Start','End','Break (min)','Hours','Regular hours','Overtime hours','Earnings','Note']];
+ const C=calc(S.entries),rows=[['Date','Client','Project','Start','End','Break (min)','Hours','Regular hours','Overtime hours','Earnings','Note']];
  [...list].sort((a,b)=>a.start-b.start).forEach(e=>{const c=C[e.id],j=jobOf(e.jobId);
-  rows.push([dayKey(e.start),j?j.name:'',tStr(e.start),tStr(e.end),e.brk||0,(c.m/60).toFixed(2),(c.r/60).toFixed(2),(c.o/60).toFixed(2),c.pay.toFixed(2),e.note||''])});
+  const cl=cliOfE(e);rows.push([dayKey(e.start),cl?cl.name:'',j?j.name:'',tStr(e.start),tStr(e.end),e.brk||0,(c.m/60).toFixed(2),(c.r/60).toFixed(2),(c.o/60).toFixed(2),c.pay.toFixed(2),e.note||''])});
  return rows.map(r=>r.map(x=>'"'+String(x).replace(/"/g,'""')+'"').join(',')).join('\n')}
 // Installed (home screen) apps on some phones can't save files from script, so there the user taps a real link instead.
 const SA=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
@@ -402,11 +472,16 @@ function dl(name,text,type){const b=text instanceof Blob?text:new Blob([text],{t
 
 /* ---------- actions ---------- */
 const A={
- tab(v){tab=v;if(v==='sum')off=0;render()},
+ tab(v){tab=v;selC=null;if(v==='sum')off=0;render()},
+ cli(v){selC=v;render();$('#main').scrollTop=0},cliBack(){selC=null;render()},addC(){cliM()},editC(v){cliM(v)},addJc(v){jobM(null,v)},
+ cliLog(){F={job:'',cl:selC,tag:'',from:'',to:'',q:'',st:'open'};tab='log';selC=null;render()},
+ saveC(v){const d={name:$('#cn').value.trim()||'Untitled client',email:$('#ce').value.trim(),phone:$('#cp').value.trim(),addr:$('#ca').value.trim(),notes:$('#co').value.trim()};
+  if(v)Object.assign(cliOf(v),d);else{const c=Object.assign({id:uid()},d);S.clients.push(c);selC=c.id}save();closeM();render()},
+ delC(v){ask('Delete this client? Their projects and invoices are kept, just without a client.','Delete',()=>{S.jobs.forEach(j=>{if(j.clientId===v)j.clientId=null});S.invoices.forEach(i=>{if(i.clientId===v)i.clientId=null});S.clients=S.clients.filter(c=>c.id!==v);selC=null;save();render()})},
  start(){const jid=$('#tj').value;S.lastJob=jid;S.running={jobId:jid,start:Date.now(),brkMs:0,brkStart:null};save();render()},
  stop(){const r=S.running,id=uid(),n=Date.now(),bm=r.brkMs+(r.brkStart?n-r.brkStart:0);S.entries.push({id,jobId:r.jobId,start:r.start,end:n,brk:Math.round(bm/60000),note:'',tags:[]});S.running=null;save();render();entryM(id,null,true)},
  addE(){entryM()},askOk(){const f=AK;AK=null;closeM();if(f)f()},brk(){const r=S.running,n=Date.now();if(r.brkStart){r.brkMs+=n-r.brkStart;r.brkStart=null}else r.brkStart=n;save();render()},doImp(){doImport()},rmPh(v){EP=EP.filter(x=>x!==v);pDel(v);syncP();showPh($('#ph'),EP)},addTag(v,el){const i=$('#'+el.dataset.t),c=parseTags(i.value);if(!c.includes(v))c.push(v);i.value=c.join(', ')},
- clrF(){F={job:'',tag:'',from:'',to:'',q:'',st:'all'};render()},csvF(){dl('timesheet-filtered.csv',csv(filt()),'text/csv')},mkInv(){mkInv()},
+ clrF(){F={job:'',cl:'',tag:'',from:'',to:'',q:'',st:'all'};render()},csvF(){dl('timesheet-filtered.csv',csv(filt()),'text/csv')},mkInv(){mkInv()},
  openI(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));invM()},
  ivAdd(){readIV();IV.items.push({d:'',q:1,r:0});invM()},ivDel(v){readIV();IV.items.splice(+v,1);invM()},
  ivSave(){readIV();commitIV();closeM();render()},
@@ -426,16 +501,16 @@ const A={
   S.lastJob=d.jobId;save();closeM();render()},
  delE(v){ask('Delete this entry?','Delete',()=>{S.entries=S.entries.filter(x=>x.id!==v);save();render()})},
  addJ(){jobM()},editJ(v){jobM(v)},
- saveJ(v){const d={name:$('#jn').value.trim()||'Untitled',rate:parseFloat($('#jr').value)||0,color:$('#jc').value,client:$('#jl').value.trim(),email:$('#jm').value.trim(),addr:$('#ja').value.trim()};
+ saveJ(v){const d={name:$('#jn').value.trim()||'Untitled',rate:parseFloat($('#jr').value)||0,color:$('#jc').value,clientId:$('#jl').value||null};
   if(v)Object.assign(jobOf(v),d);else S.jobs.push(Object.assign({id:uid()},d));save();closeM();render()},
- delJ(v){if(S.jobs.length<2){say('Keep at least one job.');return}
-  if(S.entries.some(e=>e.jobId===v)){say('This job has entries. Delete or move them first.');return}
-  ask('Delete this job?','Delete',()=>{S.jobs=S.jobs.filter(j=>j.id!==v);save();render()})},
+ delJ(v){if(S.jobs.length<2){say('Keep at least one project.');return}
+  if(S.entries.some(e=>e.jobId===v)){say('This project has entries. Delete or move them first.');return}
+  ask('Delete this project?','Delete',()=>{S.jobs=S.jobs.filter(j=>j.id!==v);save();render()})},
  prev(){off--;render()},next(){off++;render()},
  csvP(){const r=range(off);dl('timesheet-'+dayKey(r[0])+'.csv',csv(S.entries.filter(e=>e.start>=r[0]&&e.start<r[1])),'text/csv')},
  csvAll(){dl('timesheet-all.csv',csv(S.entries),'text/csv')},
  bk(){dl('timesheet-backup-'+dayKey(Date.now())+'.json',JSON.stringify(S),'application/json')},
- wipe(){ask('Erase all jobs, entries and invoices? This cannot be undone.','Erase everything',()=>{S=def();indexedDB.deleteDatabase('ts_photos');save();render()})}
+ wipe(){ask('Erase all clients, projects, entries and invoices? This cannot be undone.','Erase everything',()=>{S=def();indexedDB.deleteDatabase('ts_photos');save();render()})}
 };
 document.addEventListener('click',ev=>{
  if(ev.target.id==='modal'){closeM();return}
@@ -445,6 +520,7 @@ document.addEventListener('change',ev=>{
  if(t.id==='rf'&&t.files[0]){const f=new FileReader();f.onload=()=>{try{const d=JSON.parse(f.result);if(!Array.isArray(d.jobs)||!Array.isArray(d.entries))throw 0;
   ask('Replace current data with this backup?','Replace',()=>{localStorage.setItem(KEY,JSON.stringify(d));S=load();render()})}catch(e){say('That file is not a valid Timesheet backup.')}};f.readAsText(t.files[0]);return}
  if(t.id==='pf'){addPhotos(t.files);return}
+ if(t.id==='icl'){const c=cliOf(t.value);if(c){$('#ic').value=c.name;$('#ie').value=c.email;$('#ia').value=c.addr}return}
  if(t.dataset.m){IMP.M[t.dataset.m]=parseInt(t.value);$('#ipv').textContent=pv();return}
  if(t.id==='cf'&&t.files[0]){const f=new FileReader();f.onload=()=>{const R=parseCSV(String(f.result).replace(/^\uFEFF/,''));if(R.length<2){say('That file has no data rows.');return}IMP={head:R[0].map(x=>x.trim()),rows:R.slice(1),M:guess(R[0])};impM()};f.readAsText(t.files[0]);t.value='';return}
  if(t.dataset.f){fl(t);return}
