@@ -10,7 +10,7 @@
 <title>Timesheet</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B1%3C/text%3E%3C/svg%3E">
 <style>
-:root{--bg:#eef1f4;--card:#fff;--ink:#1b2530;--mute:#657281;--line:#d9dee4;--acc:#f2a900;--accink:#1b2530;--go:#1f8f5f;--stop:#c93b3b}
+:root{--bg:#eef1f4;--card:#ffffff;--ink:#1b2530;--mute:#657281;--line:#d9dee4;--acc:#f2a900;--accink:#1b2530;--go:#1f8f5f;--stop:#c93b3b}
 /* Dark colors: follow the phone unless Settings forces light or dark (data-theme on <html>) */
 :root{color-scheme:light dark}:root[data-theme=light]{color-scheme:light}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#11161c;--card:#1a222b;--ink:#e8edf2;--mute:#8d9aa8;--line:#2a3541;--acc:#f2b51f;--accink:#11161c;--go:#35b97f;--stop:#e4605f}}
@@ -122,7 +122,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.12';
+const VER='1.13';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -191,7 +191,8 @@ const rLabel=r=>{const f=x=>new Date(x).toLocaleDateString([],{month:'short',day
 /* ---------- views ---------- */
 const TABS=[['timer','Timer','⏱'],['cal','Calendar','📅'],['log','Log','☰'],['inv','Invoices','🧾'],['cli','Clients','👥'],['sum','Summary','📊'],['set','Settings','⚙']];
 function applyTheme(){const t=S.settings.theme,h=document.documentElement;if(t==='light'||t==='dark')h.dataset.theme=t;else delete h.dataset.theme;
- const m=document.querySelector('meta[name=theme-color]');if(m)m.content=getComputedStyle(h).getPropertyValue('--acc').trim()||'#f2a900'}
+ const m=document.querySelector('meta[name=theme-color]');if(m)m.content=getComputedStyle(h).getPropertyValue('--acc').trim()||'#f2a900';
+ if(NA&&NA.bars){const c=getComputedStyle(h),bg=c.getPropertyValue('--bg').trim();NA.bars(bg,c.getPropertyValue('--card').trim(),bg==='#11161c')}}
 function render(){applyTheme();
  $('#nav').innerHTML=TABS.map(t=>`<button data-a="tab" data-v="${t[0]}" class="${tab===t[0]?'on':''}"><span>${t[2]}</span>${t[1]}</button>`).join('');
  $('#main').innerHTML=({timer:vTimer,cal:vCal,log:vLog,inv:vInv,cli:vCli,sum:vSum,set:vSet})[tab]();
@@ -448,7 +449,7 @@ function vSet(){const s=S.settings;
  <label>Import hours from a CSV file<input type="file" id="cf" accept=".csv,text/csv"></label>
  <label>Restore from backup<input type="file" id="rf" accept=".json,application/json"></label>
  <button class="danger" data-a="wipe" style="width:100%">Erase all data</button></div>
- <p class="muted center">Timesheet v${VER}. Data is stored on this device only.</p>`}
+ <p class="muted center">Timesheet v${VER}${NA?' · Android app '+esc(NA.version()):''}. Data is stored on this device only.</p>`}
 
 /* ---------- modals ---------- */
 const openM=h=>{$('#sheet').innerHTML=h;if(!$('#modal').classList.contains('open')&&!(history.state&&history.state.m))history.pushState({m:1},'');$('#modal').classList.add('open');const ph=$('#ph');if(ph)showPh(ph,EP)};
@@ -597,7 +598,16 @@ function csv(list,xs){
 // Installed (home screen) apps on some phones can't save files from script, so there the user taps a real link instead.
 const SA=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 let FU=null,FM=null;
+// Inside the Android app (android/ folder) the shell provides real save and share; see MainActivity.Bridge.
+const NA=window.AndroidApp||null;
+const naSend=blob=>new Promise((ok,no)=>{const fr=new FileReader();fr.onerror=no;fr.onload=()=>{const b=String(fr.result).split(',')[1]||'';
+ if(!NA.begin(blob.name))return no();for(let i=0;i<b.length;i+=262144)if(!NA.append(b.slice(i,i+262144)))return no();ok()};fr.readAsDataURL(blob)});
 function fileM(name,blob,o={}){
+ if(NA){FM={f:new File([blob],name,{type:blob.type}),title:o.title||name,txt:o.txt||'',email:o.email||''};
+  openM(`<h3>${esc(o.head||'File ready')}</h3><div class="muted" style="margin-bottom:12px">${esc(name)}</div>
+  <button class="pri" data-a="nShare" style="width:100%;margin-bottom:8px">${o.email!==undefined?'Email or share…':'Share…'}</button>
+  <button data-a="nSave" style="width:100%">Save to Downloads</button>
+  <button data-a="${o.back?'fBack':'close'}" style="width:100%;margin-top:8px">${o.back?'Back to invoice':'Close'}</button>`);return}
  if(FU)URL.revokeObjectURL(FU);FU=URL.createObjectURL(blob);
  const f=new File([blob],name,{type:blob.type}),sh=!!(navigator.canShare&&navigator.canShare({files:[f]}));FM={f,title:o.title||name,txt:o.txt||''};
  openM(`<h3>${esc(o.head||'File ready')}</h3><div class="muted" style="margin-bottom:12px">${esc(name)}</div>
@@ -606,7 +616,7 @@ function fileM(name,blob,o={}){
  ${o.mail?`<a class="btn" href="${esc(o.mail)}">Open email app</a><div class="muted" style="margin-bottom:8px">Email apps can't pick up the file by themselves. Save it first, then attach it to the email.</div>`:''}
  ${SA()&&o.open?`<a class="btn" href="${esc(o.open)}" target="_blank" rel="noopener">Open in browser instead</a><div class="muted">If saving does nothing or shows a blank page, this phone doesn't let installed apps save files. Open in your browser and save from there.</div>`:''}
  <button data-a="${o.back?'fBack':'close'}" style="width:100%;margin-top:8px">${o.back?'Back to invoice':'Close'}</button>`)}
-function dl(name,text,type){const b=text instanceof Blob?text:new Blob([text],{type});if(SA()){fileM(name,b,{open:'?tab='+tab});return}
+function dl(name,text,type){const b=text instanceof Blob?text:new Blob([text],{type});if(SA()||NA){fileM(name,b,{open:'?tab='+tab});return}
  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),3000)}
 
 /* ---------- actions ---------- */
@@ -629,11 +639,13 @@ const A={
  ivSave(){readIV();commitIV();closeM();render()},
  fShare(){navigator.share({files:[FM.f],title:FM.title,text:FM.txt}).catch(e=>{if(e.name!=='AbortError')say('Sharing failed. Use Save to device instead.')})},
  fBack(){invM()},
+ nShare(){naSend(FM.f).then(()=>NA.share(FM.f.type,FM.title,FM.txt,FM.email)).catch(()=>say('Could not prepare the file.'))},
+ nSave(){naSend(FM.f).then(()=>NA.save(FM.f.type)).catch(()=>say('Could not prepare the file.'))},
  ivDelete(){const id=IV.id;ask('Delete this invoice? Its entries and expenses become uninvoiced.','Delete',()=>{S.entries.forEach(e=>{if(e.inv===id)delete e.inv});S.expenses.forEach(x=>{if(x.inv===id)delete x.inv});S.invoices=S.invoices.filter(i=>i.id!==id);save();render()})},
  async ivPdf(){let b;try{say('Making the PDF…');b=await makePdf()}catch(e){say('Could not make the PDF. The PDF tool needs an internet connection the first time.');return}
   const wasNew=IV.isNew;commitIV();render();if(wasNew)say('Invoice saved as '+IV.num+'.');
   const txt='Invoice '+IV.num+' from '+(S.biz.name||'me')+': '+money(tot(IV).g)+', due '+IV.due+'.';
-  fileM('Invoice-'+IV.num+'.pdf',b,{head:'Invoice '+IV.num+' is ready',title:'Invoice '+IV.num,txt,back:1,open:'?inv='+IV.id,
+  fileM('Invoice-'+IV.num+'.pdf',b,{head:'Invoice '+IV.num+' is ready',title:'Invoice '+IV.num,txt,back:1,open:'?inv='+IV.id,email:IV.email||'',
    mail:'mailto:'+encodeURI(IV.email||'')+'?subject='+encodeURIComponent('Invoice '+IV.num)+'&body='+encodeURIComponent(txt+'\n\nThe invoice PDF is attached.')})},
  day(v){dayM(v)},addD(v){entryM(null,v)},calPrev(){cOff--;render()},calNext(){cOff++;render()},calNow(){cOff=0;render()},editE(v){entryM(v)},close(){dropUnsaved();closeM()},
  saveE(v){if(putE(v)){closeM();render()}},

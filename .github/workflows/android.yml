@@ -1,0 +1,76 @@
+# Builds the Android app (a shell around the live site) and publishes the APK as a release.
+# The shell rarely changes: web updates reach the installed app by themselves.
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml', 'icon-512.png']
+  pull_request:
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Launcher icon
+        run: |
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          cp icon-512.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+      # Every build must be signed with the same key, or Android refuses to update the installed app.
+      - name: Signing key
+        id: key
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/ks.p12"
+            echo "file=$RUNNER_TEMP/ks.p12" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROID_KEYSTORE secret is not set. Building an unsigned test build only; no APK is published."
+          fi
+
+      - name: Build
+        working-directory: android
+        env:
+          KS_FILE: ${{ steps.key.outputs.file }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          # Set a SITE_URL repository variable only if the site is not at the standard Pages address.
+          SITE_URL: ${{ vars.SITE_URL || format('https://{0}.github.io/{1}/', github.repository_owner, github.event.repository.name) }}
+        run: |
+          SITE_URL=$(echo "$SITE_URL" | sed -E 's#^(https://)([^/]+)#\1\L\2#')
+          echo "Site: $SITE_URL"
+          if [ -n "$KS_FILE" ]; then TASK=assembleRelease; else TASK=assembleDebug; fi
+          gradle --no-daemon $TASK -PsiteUrl="$SITE_URL" -Pvc=${{ github.run_number }} -Pvn=1.0.${{ github.run_number }}
+          if [ -n "$KS_FILE" ]; then cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Timesheet.apk"; fi
+
+      - name: Keep the APK with this run
+        if: steps.key.outputs.file != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Timesheet-apk
+          path: ${{ runner.temp }}/Timesheet.apk
+
+      - name: Publish release
+        if: steps.key.outputs.file != '' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "apk-${{ github.run_number }}" "$RUNNER_TEMP/Timesheet.apk" \
+            --title "Timesheet Android app 1.0.${{ github.run_number }}" \
+            --notes "Download Timesheet.apk on your phone and open it to install or update. Your data is kept when updating." \
+            --latest
