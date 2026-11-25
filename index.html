@@ -114,6 +114,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset
 input[type=file]{padding:8px;font-size:14px}
 input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 12px;margin-right:10px}
 #toast{bottom:auto;top:calc(12px + env(safe-area-inset-top,0px))}
+#toast.act{align-items:center;justify-content:space-between;gap:12px}#toast button{background:var(--acc);color:var(--accink);border:0;font-weight:700;padding:9px 16px;white-space:nowrap;flex:none}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 .pkg{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px}
 .pkd{min-height:50px}.pkd.off{cursor:default;opacity:.45}.pkd.off.iv{opacity:.8}.pkd u{font-size:9px;min-height:11px}
@@ -144,7 +145,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.18';
+const VER='1.19';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -166,7 +167,15 @@ function migrate(D){
  D.invoices.forEach(i=>{if(i.clientId!==undefined)return;const c=i.client&&find(i.client.trim());i.clientId=c?c.id:null});
  return D}
 function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.jobs&&d.entries){const b=def();return migrate(Object.assign(b,d,{settings:Object.assign(b.settings,d.settings)}))}}catch(e){}return def()}
-function store(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+// Undo for deletes: a copy of everything from just before is kept for a few seconds. Any other change ends the offer,
+// and photos of what was deleted are only removed once the chance to undo has passed.
+let UNDO=null,UT=0;
+function endUndo(){clearTimeout(UT);if(UNDO){const t=$('#toast');if(t&&t.classList.contains('undo'))t.style.display='none';UNDO.photos.forEach(pDel);UNDO=null}}
+function offerUndo(msg,snap,photos){endUndo();UNDO={snap,photos:photos||[]};sayAct(msg,'Undo','undo','',9000,'undo');UT=setTimeout(endUndo,9000)}
+// Sets an invoice's status (and the open invoice form's copy of it). A sent or paid invoice no longer follows the log.
+function setStatus(iv,st){iv.status=st;if(st==='paid'){if(!iv.paidOn)iv.paidOn=dayKey(Date.now())}else delete iv.paidOn;
+ if(IV&&IV.id===iv.id){IV.status=st;if(iv.paidOn)IV.paidOn=iv.paidOn;else delete IV.paidOn}save()}
+function store(){if(UNDO)endUndo();try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 // Every save also brings draft invoices back in line with the log; SYN lists the drafts that changed.
 let SYN=[];
 function save(){try{SYN=syncDrafts()}catch(e){SYN=[]}store()}
@@ -253,7 +262,12 @@ function vTimer(){
  :`<select id="tj">${jobOpts(defJob())}</select>`}
  
  ${r?`<button class="big brk" data-a="brk" style="margin-bottom:10px">${r.brkStart?'Resume work':'Take a break'}</button><button class="big stop" data-a="stop">Stop</button>`:`<button class="big go" data-a="start">Start</button>`}</div>
- <div class="stats" id="tstats">${tStats()}</div><button data-a="addX" style="width:100%;margin-bottom:12px">🧾 Add an expense</button>${bkNag()}`}
+ <div class="stats" id="tstats">${tStats()}</div>${moneyTiles()}<button data-a="addX" style="width:100%;margin-bottom:12px">🧾 Add an expense</button>${bkNag()}`}
+// What is owed and what is still unbilled; tapping a tile goes to the invoices or starts a new invoice.
+function moneyTiles(){const C=calc(S.entries),sent=S.invoices.filter(i=>i.status==='sent'),od=sent.filter(isOd),w=sent.reduce((a,i)=>a+tot(i).g,0),o=od.reduce((a,i)=>a+tot(i).g,0);
+ const t=sum(S.entries.filter(e=>!e.inv),C),xt=xSum(S.expenses.filter(x=>!x.inv&&xBill(x))),unb=t.pay+xt;
+ return`<div class="stats"><div class="card stat" data-a="tab" data-v="inv" style="cursor:pointer"><span class="muted">Waiting to be paid</span><b style="color:${w?'var(--stop)':'inherit'}">${money(w)}</b>${od.length?`<span style="color:var(--stop)">${od.length} overdue · ${money(o)}</span>`:`<span class="muted">${sent.length?sent.length+' invoice'+(sent.length===1?'':'s'):'Nothing outstanding'}</span>`}</div>
+ <div class="card stat" data-a="pkOpen" style="cursor:pointer"><span class="muted">Not invoiced yet</span><b>${money(unb)}</b><span class="muted">${unb>0?hm(t.m)+' h'+(xt?' + '+money(xt)+' expenses':''):'All invoiced'}</span></div></div>`}
 // Today / This week, counting the running session too (at the plain rate; overtime is worked out once it's saved).
 function tStats(){
  const C=calc(S.entries),t0=new Date();t0.setHours(0,0,0,0);const td=sum(S.entries.filter(e=>e.start>=+t0),C),wk=sum(S.entries.filter(e=>e.start>=+wkStart(Date.now())),C),r=S.running;
@@ -349,11 +363,17 @@ const ST={draft:'Draft',sent:'Sent, unpaid',paid:'Paid'};
 const isOd=i=>i.status==='sent'&&i.due&&i.due<dayKey(Date.now());
 const invRow=i=>`<div class="item ${i.status}" data-a="invMenu" data-v="${i.id}"><div>${esc(i.num)}<div class="muted">${esc(i.client||(cliOf(i.clientId)||{}).name||'')} · ${i.date}${i.status==='paid'&&i.paidOn?' · paid '+i.paidOn:isOd(i)?' · due '+i.due:''}</div></div><div class="right">${money(tot(i).g)}<span class="st ${i.status}">${isOd(i)?'Overdue':ST[i.status]}</span></div></div>`;
 // Tapping an invoice opens this menu: change its status in one tap, or go on to edit, preview or send it.
+// A ready-to-send email asking for payment (no attachment).
+const remindLink=iv=>{const nm=iv.client||(cliOf(iv.clientId)||{}).name||'',od=isOd(iv),amt=money(tot(iv).g),me=S.biz.name;
+ const subj=(od?'Overdue: ':'Reminder: ')+'invoice '+iv.num+(me?' from '+me:'');
+ const body='Hi'+(nm?' '+nm:'')+',\n\n'+(od?'A quick reminder that invoice '+iv.num+' for '+amt+' was due on '+iv.due+' and I have not seen payment yet.':'A quick reminder that invoice '+iv.num+' for '+amt+' is due on '+iv.due+'.')+(iv.notes?'\n\nPayment details:\n'+iv.notes:'')+'\n\nIf you have already paid, please ignore this message. Let me know if you have any questions.\n\nThanks'+(me?',\n'+me:'');
+ return'mailto:'+encodeURI(iv.email||'')+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body)};
 function invMenu(id){const iv=S.invoices.find(i=>i.id===id);if(!iv)return;const T=tot(iv),h=hrs(iv),nm=iv.client||(cliOf(iv.clientId)||{}).name||'No client';
  openM(`<div class="between" style="margin-bottom:4px"><h3 style="margin:0">${esc(iv.num)}</h3><span class="st ${iv.status}">${isOd(iv)?'Overdue':ST[iv.status]}</span></div>
  <div class="muted" style="margin-bottom:14px">${esc(nm)} · ${money(T.g)}${h>0?' · '+h.toFixed(2)+' hrs':''}<br>Dated ${esc(iv.date)}, due ${esc(iv.due)}${iv.status==='paid'&&iv.paidOn?', paid '+esc(iv.paidOn):''}</div>
  <b>Status</b><div class="seg stseg" style="margin:6px 0 14px">${[['draft','Draft'],['sent','Sent'],['paid','Paid']].map(x=>`<button data-a="ivSt" data-v="${id}|${x[0]}" class="${iv.status===x[0]?'on '+x[0]:''}">${x[1]}</button>`).join('')}</div>
- <button class="pri" data-a="openI" data-v="${id}" style="width:100%;margin-bottom:8px">Edit invoice</button>
+ ${iv.status==='sent'?`<a class="btn pri" href="${esc(remindLink(iv))}">${isOd(iv)?'Send overdue reminder':'Send payment reminder'}</a>`:''}
+ <button class="${iv.status==='sent'?'':'pri'}" data-a="openI" data-v="${id}" style="width:100%;margin-bottom:8px">Edit invoice</button>
  <div class="row" style="margin-bottom:8px"><button data-a="imPrev" data-v="${id}">Preview</button><button data-a="imPdf" data-v="${id}">Get PDF</button></div>
  <button data-a="close" style="width:100%">Close</button>`)}
 function vInv(){
@@ -649,7 +669,11 @@ const openM=(h,f,key)=>{const sh=$('#sheet'),was=$('#modal').classList.contains(
  $('#modal').classList.add('open');if(keep)sh.querySelector('.sbody').scrollTop=top;const ph=$('#ph');if(ph)showPh(ph,EP)};
 let AK=null;
 function ask(msg,label,fn){AK=fn;openM('<h3>'+esc(msg)+'</h3><div class="row"><button data-a="close">Cancel</button><button class="danger" data-a="askOk">'+label+'</button></div>')}
-function say(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.textContent=m;t.style.display='block';clearTimeout(say.h);say.h=setTimeout(()=>t.style.display='none',3500+m.length*40)}
+function say(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.className='';t.textContent=m;t.style.display='block';clearTimeout(say.h);say.h=setTimeout(()=>t.style.display='none',3500+m.length*40)}
+// A toast with a button (Undo, Mark as sent). It goes away after ms, or when the button does its job.
+function sayAct(m,label,act,v,ms,cls){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}
+ t.className='act'+(cls?' '+cls:'');t.innerHTML='<span></span><button data-a="'+act+'" data-v="'+esc(v||'')+'">'+esc(label)+'</button>';t.firstChild.textContent=m;t.style.display='flex';clearTimeout(say.h);say.h=setTimeout(()=>t.style.display='none',ms||9000)}
+const hideToast=()=>{const t=$('#toast');if(t)t.style.display='none'};
 // New-entry photos are stored as soon as they're picked, so drop them if that entry is never saved.
 const dropUnsaved=()=>{if($('#pf')&&!curE&&!curX&&EP.length){EP.forEach(pDel);EP=[]}};
 // Each open sheet / client page is a history step, so the phone's back button closes it. fn runs once the sheet's step is gone.
@@ -796,19 +820,22 @@ let FU=null,FM=null;
 const NA=window.AndroidApp||null;
 const naSend=blob=>new Promise((ok,no)=>{const fr=new FileReader();fr.onerror=no;fr.onload=()=>{const b=String(fr.result).split(',')[1]||'';
  if(!NA.begin(blob.name))return no();for(let i=0;i<b.length;i+=262144)if(!NA.append(b.slice(i,i+262144)))return no();ok()};fr.readAsDataURL(blob)});
+// "Mark INV-001 as sent" for a draft invoice whose PDF is being sent.
+const sentBtn=id=>{const iv=id&&S.invoices.find(i=>i.id===id);return iv&&iv.status==='draft'?`<button data-a="mkSent" data-v="${id}" style="width:100%;margin-top:8px">Mark ${esc(iv.num)} as sent</button>`:''};
 function fileM(name,blob,o={}){
- if(NA){FM={f:new File([blob],name,{type:blob.type}),title:o.title||name,txt:o.txt||'',email:o.email||''};
+ if(NA){FM={f:new File([blob],name,{type:blob.type}),title:o.title||name,txt:o.txt||'',email:o.email||'',inv:o.inv||''};
   openM(`<h3>${esc(o.head||'File ready')}</h3><div class="muted" style="margin-bottom:12px">${esc(name)}</div>
   <button class="pri" data-a="nShare" style="width:100%;margin-bottom:8px">${o.email!==undefined?'Email or share…':'Share…'}</button>
-  <button data-a="nSave" style="width:100%">Save to Downloads</button>
+  <button data-a="nSave" style="width:100%">Save to Downloads</button>${sentBtn(o.inv)}
   <button data-a="${o.back?'fBack':'close'}" style="width:100%;margin-top:8px">${o.back?'Back to invoice':'Close'}</button>`);return}
  if(FU)URL.revokeObjectURL(FU);FU=URL.createObjectURL(blob);
- const f=new File([blob],name,{type:blob.type}),sh=!!(navigator.canShare&&navigator.canShare({files:[f]}));FM={f,title:o.title||name,txt:o.txt||''};
+ const f=new File([blob],name,{type:blob.type}),sh=!!(navigator.canShare&&navigator.canShare({files:[f]}));FM={f,title:o.title||name,txt:o.txt||'',inv:o.inv||''};
  openM(`<h3>${esc(o.head||'File ready')}</h3><div class="muted" style="margin-bottom:12px">${esc(name)}</div>
  ${sh?'<button class="pri" data-a="fShare" style="width:100%;margin-bottom:8px">Share…</button>':''}
  <a class="btn ${sh?'':'pri'}" href="${FU}" download="${esc(name)}">Save to device</a>
- ${o.mail?`<a class="btn" href="${esc(o.mail)}">Open email app</a><div class="muted" style="margin-bottom:8px">Email apps can't pick up the file by themselves. Save it first, then attach it to the email.</div>`:''}
+ ${o.mail?`<a class="btn" href="${esc(o.mail)}" data-a="sentW" data-v="${esc(o.inv||'')}">Open email app</a><div class="muted" style="margin-bottom:8px">Email apps can't pick up the file by themselves. Save it first, then attach it to the email.</div>`:''}
  ${SA()&&o.open?`<a class="btn" href="${esc(o.open)}" target="_blank" rel="noopener">Open in browser instead</a><div class="muted">If saving does nothing or shows a blank page, this phone doesn't let installed apps save files. Open in your browser and save from there.</div>`:''}
+${sentBtn(o.inv)}
  <button data-a="${o.back?'fBack':'close'}" style="width:100%;margin-top:8px">${o.back?'Back to invoice':'Close'}</button>`)}
 function dl(name,text,type){const b=text instanceof Blob?text:new Blob([text],{type});if(SA()||NA){fileM(name,b,{open:'?tab='+tab});return}
  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),3000)}
@@ -820,7 +847,7 @@ const A={
  cliLog(){F={job:'',cl:selC,tag:'',from:'',to:'',q:'',st:'open'};tab='log';selC=null;render()},
  saveC(v){const d={name:$('#cn').value.trim()||'Untitled client',email:$('#ce').value.trim(),phone:$('#cp').value.trim(),addr:$('#ca').value.trim(),notes:$('#co').value.trim()};
   if(v){Object.assign(cliOf(v),d);save();closeM();render()}else{const c=Object.assign({id:uid()},d);S.clients.push(c);save();closeM(()=>A.cli(c.id));render()}},
- delC(v){ask('Delete this client? Their projects and invoices are kept, just without a client.','Delete',()=>{S.jobs.forEach(j=>{if(j.clientId===v)j.clientId=null});S.invoices.forEach(i=>{if(i.clientId===v)i.clientId=null});S.clients=S.clients.filter(c=>c.id!==v);selC=null;save();render()})},
+ delC(v){ask('Delete this client? Their projects and invoices are kept, just without a client.','Delete',()=>{const sn=JSON.stringify(S);S.jobs.forEach(j=>{if(j.clientId===v)j.clientId=null});S.invoices.forEach(i=>{if(i.clientId===v)i.clientId=null});S.clients=S.clients.filter(c=>c.id!==v);selC=null;save();render();offerUndo('Client deleted.',sn)})},
  start(){const jid=$('#tj').value,t=Date.now();S.lastJob=jid;S.running={jobId:jid,start:t,brkMs:0,brkStart:null,loc:null};save();render();
   if(S.settings.geo)getPos().then(async p=>{p.addr=await addrFor(p);
    if(S.running&&S.running.start===t){S.running.loc=p;save();if(tab==='timer')render()}
@@ -833,15 +860,18 @@ const A={
  imPrev(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));prevM()},
  imPdf(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));A.ivPdf('p')},
  ivSt(v){const [id,st]=v.split('|'),iv=S.invoices.find(i=>i.id===id);if(!iv||iv.status===st)return;
-  const go=done=>{iv.status=st;if(st==='paid'){if(!iv.paidOn)iv.paidOn=dayKey(Date.now())}else delete iv.paidOn;save();if(!done)closeM();render();
+  const go=done=>{setStatus(iv,st);if(!done)closeM();render();
    say(iv.num+' marked '+({draft:'as draft',sent:'sent, unpaid',paid:'paid'})[st]+'.'+(st==='draft'&&SYN.includes(iv.num)?' Its lines were updated from your log.':''))};
   // a draft follows the log, so moving a sent or paid invoice back to draft can change what the client was shown
   if(st==='draft')ask('Move '+iv.num+' back to draft? Drafts update to match your log, so its lines and total may change.','Move to draft',()=>go(true));else go()},
  ivAdd(){readIV();IV.items.push({d:'',q:1,r:0,u:'q'});invM()},ivDel(v){readIV();const it=IV.items.splice(+v,1)[0];
   if(it.e&&!IV.items.some(i=>i.e===it.e))IV.eids=IV.eids.filter(x=>x!==it.e);if(it.x)IV.xids=(IV.xids||[]).filter(x=>x!==it.x);invM()},
  ivSave(){readIV();commitIV();closeM();render()},
- fShare(){navigator.share({files:[FM.f],title:FM.title,text:FM.txt}).catch(e=>{if(e.name!=='AbortError')say('Sharing failed. Use Save to device instead.')})},
+ fShare(){navigator.share({files:[FM.f],title:FM.title,text:FM.txt}).then(()=>{if(FM.inv){PSW={id:FM.inv,t:0};askSent()}}).catch(e=>{if(e.name!=='AbortError')say('Sharing failed. Use Save to device instead.')})},
  fBack(){invM()},
+ sentW(v){if(v)PSW={id:v,t:Date.now()}},
+ mkSent(v,el){const iv=S.invoices.find(i=>i.id===v);if(!iv||iv.status!=='draft')return;setStatus(iv,'sent');render();if(el&&el.closest('#sheet'))el.remove();say(iv.num+' marked as sent.')},
+ undo(){const u=UNDO;if(!u)return;clearTimeout(UT);UNDO=null;S=JSON.parse(u.snap);store();hideToast();render();say('Restored.')},
  pkOpen(){pickOpen()},pkCli(){pickOpen(selC==='none'?'':selC)},pkPrev(){PK.off--;pickM()},pkNext(){PK.off++;pickM()},
  pkT(v){PK.sel.has(v)?PK.sel.delete(v):PK.sel.add(v);pickM()},
  pkAll(){const ks=Object.keys(pkData(PK.cl)).filter(k=>pkMonth(k)===PK.off),on=ks.every(k=>PK.sel.has(k));ks.forEach(k=>on?PK.sel.delete(k):PK.sel.add(k));pickM()},
@@ -854,14 +884,14 @@ const A={
    if([...L,...X].some(e=>(e.photos||[]).length))IV.pics=true;IV.lk=IV.lk||0;
    PK=null;invM();say('Added '+ks.length+' day'+(ks.length===1?'':'s')+'. Save the invoice to keep them.');return}
   buildInv(ks.flatMap(k=>D[k].E).sort((a,b)=>a.start-b.start),ks.flatMap(k=>D[k].X),cliOf(PK.cl)||null)},
- nShare(){naSend(FM.f).then(()=>NA.share(FM.f.type,FM.title,FM.txt,FM.email)).catch(()=>say('Could not prepare the file.'))},
+ nShare(){naSend(FM.f).then(()=>{NA.share(FM.f.type,FM.title,FM.txt,FM.email);if(FM.inv)PSW={id:FM.inv,t:Date.now()}}).catch(()=>say('Could not prepare the file.'))},
  nSave(){naSend(FM.f).then(()=>NA.save(FM.f.type)).catch(()=>say('Could not prepare the file.'))},
- ivDelete(){const id=IV.id;ask('Delete this invoice? Its entries and expenses become uninvoiced.','Delete',()=>{S.entries.forEach(e=>{if(e.inv===id)delete e.inv});S.expenses.forEach(x=>{if(x.inv===id)delete x.inv});S.invoices=S.invoices.filter(i=>i.id!==id);save();render()})},
+ ivDelete(){const id=IV.id;ask('Delete this invoice? Its entries and expenses become uninvoiced.','Delete',()=>{const sn=JSON.stringify(S),num=(S.invoices.find(i=>i.id===id)||{}).num;S.entries.forEach(e=>{if(e.inv===id)delete e.inv});S.expenses.forEach(x=>{if(x.inv===id)delete x.inv});S.invoices=S.invoices.filter(i=>i.id!==id);save();render();offerUndo('Invoice '+num+' deleted.',sn)})},
  ivPrev(){readIV();prevM()},
  async ivPdf(v){let b;try{say('Making the PDF…');b=await makePdf(v==='p')}catch(e){say('Could not make the PDF. The PDF tool needs an internet connection the first time.');return}
   const wasNew=IV.isNew;commitIV();render();if(wasNew)say('Invoice saved as '+IV.num+'.');
   const txt='Invoice '+IV.num+' from '+(S.biz.name||'me')+': '+money(tot(IV).g)+', due '+IV.due+'.';
-  fileM('Invoice-'+IV.num+'.pdf',b,{head:'Invoice '+IV.num+' is ready',title:'Invoice '+IV.num,txt,back:1,open:'?inv='+IV.id,email:IV.email||'',
+  fileM('Invoice-'+IV.num+'.pdf',b,{head:'Invoice '+IV.num+' is ready',title:'Invoice '+IV.num,txt,back:1,inv:IV.id,open:'?inv='+IV.id,email:IV.email||'',
    mail:'mailto:'+encodeURI(IV.email||'')+'?subject='+encodeURIComponent('Invoice '+IV.num)+'&body='+encodeURIComponent(txt+'\n\nThe invoice PDF is attached.')})},
  day(v){dayM(v)},addD(v){entryM(null,v)},calPrev(){cOff--;render()},calNext(){cOff++;render()},calNow(){cOff=0;render()},editE(v){entryM(v)},close(){dropUnsaved();closeM()},
  saveE(v){if(putE(v)){closeM();render();synSay()}},
@@ -876,11 +906,11 @@ const A={
   const d={jobId:$('#xj').value,date,amt:+amt.toFixed(2),desc:$('#xn').value.trim(),bill:$('#xb').checked,photos:[...EP]};
   if(v)Object.assign(S.expenses.find(x=>x.id===v),d);else S.expenses.push(Object.assign({id:uid()},d));save();closeM();render();synSay()},
  delX(v){const x=S.expenses.find(y=>y.id===v),i=x&&S.invoices.find(y=>y.id===x.inv);
-  ask(!i?'Delete this expense?':i.status==='draft'?'Delete this expense? It also comes off draft invoice '+i.num+'.':'Delete this expense? It stays on invoice '+i.num+', which won\'t change.','Delete',()=>{(x.photos||[]).forEach(pDel);S.expenses=S.expenses.filter(y=>y.id!==v);save();render();synSay()})},
+  ask(!i?'Delete this expense?':i.status==='draft'?'Delete this expense? It also comes off draft invoice '+i.num+'.':'Delete this expense? It stays on invoice '+i.num+', which won\'t change.','Delete',()=>{const sn=JSON.stringify(S);S.expenses=S.expenses.filter(y=>y.id!==v);save();render();offerUndo('Expense deleted.'+(SYN.length?' Updated draft '+SYN.join(', ')+'.':''),sn,x.photos)})},
  locGet(){say('Finding your location…');getPos().then(async p=>{p.addr=await addrFor(p);if($('#lc')){setLoc(p);say('Location added. Save the entry to keep it.')}}).catch(e=>say(geoMsg(e)))},
  locClr(){setLoc(null)},
  delE(v){const e=S.entries.find(x=>x.id===v),i=e&&S.invoices.find(x=>x.id===e.inv);
-  ask(!i?'Delete this entry?':i.status==='draft'?'Delete this entry? It also comes off draft invoice '+i.num+'.':'Delete this entry? It stays on invoice '+i.num+', which won\'t change.','Delete',()=>{(e.photos||[]).forEach(pDel);S.entries=S.entries.filter(x=>x.id!==v);save();render();synSay()})},
+  ask(!i?'Delete this entry?':i.status==='draft'?'Delete this entry? It also comes off draft invoice '+i.num+'.':'Delete this entry? It stays on invoice '+i.num+', which won\'t change.','Delete',()=>{const sn=JSON.stringify(S);S.entries=S.entries.filter(x=>x.id!==v);save();render();offerUndo('Entry deleted.'+(SYN.length?' Updated draft '+SYN.join(', ')+'.':''),sn,e.photos)})},
  addJ(){jobM()},editJ(v){jobM(v)},
  jcRnd(){$('#jc').value=newColor()},
  archJ(v){const j=jobOf(v);
@@ -895,7 +925,7 @@ const A={
  delJ(v){if(S.running&&S.running.jobId===v){say('The timer is running on this project. Stop it first.');return}
   if(S.jobs.length<2){say('Keep at least one project.');return}
   if(S.entries.some(e=>e.jobId===v)||S.expenses.some(x=>x.jobId===v)){say('This project has entries or expenses. Delete or move them first.');return}
-  ask('Delete this project?','Delete',()=>{S.jobs=S.jobs.filter(j=>j.id!==v);save();render()})},
+  ask('Delete this project?','Delete',()=>{const sn=JSON.stringify(S);S.jobs=S.jobs.filter(j=>j.id!==v);save();render();offerUndo('Project deleted.',sn)})},
  prev(){off--;render()},next(){off++;render()},
  csvP(){const r=sumRange(off);dl('timesheet-'+dayKey(r[0])+'.csv',csv(S.entries.filter(e=>e.start>=r[0]&&e.start<r[1]),S.expenses.filter(x=>{const m=xMs(x);return m>=r[0]&&m<r[1]})),'text/csv')},
  csvAll(){dl('timesheet-all.csv',csv(S.entries,S.expenses),'text/csv')},
@@ -903,6 +933,10 @@ const A={
   S.lastBk=Date.now();save();render();dl('timesheet-backup-'+dayKey(Date.now())+'.json',JSON.stringify(Object.assign({},S,{photoData:P})),'application/json')},
  wipe(){ask('Erase all clients, projects, entries, expenses and invoices? This cannot be undone.','Erase everything',()=>{S=def();if(DBP)DBP.then(d=>d.close()).catch(()=>{});DBP=null;indexedDB.deleteDatabase('ts_photos');save();render()})}
 };
+// After a PDF goes to a share sheet or mail app and you come back, ask whether to mark the invoice as sent.
+let PSW=null;
+function askSent(){const w=PSW;if(!w||Date.now()-w.t<1500)return;PSW=null;const iv=S.invoices.find(i=>i.id===w.id);if(iv&&iv.status==='draft')sayAct('Did you send '+iv.num+'?','Mark as sent','mkSent',iv.id,15000)}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)askSent()});addEventListener('focus',askSent);
 document.addEventListener('click',ev=>{
  if(ev.target.id==='modal'){dropUnsaved();closeM();return}
  const el=ev.target.closest('[data-a]');if(el&&A[el.dataset.a])A[el.dataset.a](el.dataset.v,el)});
