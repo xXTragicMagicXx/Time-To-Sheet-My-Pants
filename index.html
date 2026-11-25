@@ -123,7 +123,8 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 .paper .pt{font-size:22px;font-weight:700;letter-spacing:.5px}.pcols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
 .ptab{width:100%;border-collapse:collapse}.ptab th{text-align:left;font-size:11px;border-top:1px solid #1b2530;border-bottom:1px solid #1b2530;padding:5px 0}
 .ptab td{padding:5px 0;vertical-align:top;border-bottom:1px solid #e6e9ed}.ptab th:nth-child(n+2),.ptab td:nth-child(n+2){text-align:right;white-space:nowrap;padding-left:8px}
-.ptot{margin:10px 0 0 auto;width:62%}.ptot div{display:flex;justify-content:space-between;padding:2px 0}.ptot .g{font-weight:700;font-size:14px;border-top:1px solid #1b2530;margin-top:4px;padding-top:5px}
+.ptot{margin:10px 0 0 auto;width:62%}.ptot div{display:flex;justify-content:space-between;padding:2px 0}.ptab tr.pst td{font-weight:700;border-top:1px solid #1b2530;border-bottom:0;padding-top:7px}
+.ptot .g{font-weight:700;font-size:14px;margin-top:4px}
 .pn{margin-top:14px}.paper .ph{width:64px;height:64px}
 .seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px;margin-bottom:12px}
 .seg button{flex:1;border:0;background:none;padding:8px 2px;font-size:13px;border-radius:9px;color:var(--mute);white-space:nowrap}
@@ -143,7 +144,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.17';
+const VER='1.18';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -337,6 +338,8 @@ const isH=i=>i.u==='h';
 const hrs=iv=>iv.items.reduce((a,i)=>a+(isH(i)?i.q:0),0);
 // Column heading and cell text for the quantity column: Hours, Qty, or Hrs / Qty (cells then say "hrs") when both appear.
 const qHead=iv=>{const n=iv.items.filter(isH).length;return!n?'Qty':n<iv.items.length?'Hrs / Qty':'Hours'};
+// The hours total that goes in the Subtotal row, under the quantity column ('' when the invoice has no hour lines).
+const hCell=iv=>{const h=hrs(iv);return h>0?h.toFixed(2)+(qHead(iv)==='Hrs / Qty'?' hrs':''):''};
 const qCell=(i,iv)=>isH(i)&&qHead(iv)==='Hrs / Qty'?i.q+' hrs':String(i.q);
 // Lines saved before units existed: hours if made from an entry, quantity for expenses and anything typed by hand.
 function normUnits(){let ch=false;S.invoices.forEach(iv=>iv.items.forEach(i=>{if(i.u)return;ch=true;
@@ -472,8 +475,8 @@ function prevM(){const b=S.biz,T=tot(IV),m=money,L=x=>esc(x||'').replace(/\n/g,'
  <div class="paper">
   <div class="between" style="align-items:flex-start"><div class="pt">INVOICE</div><div style="text-align:right">#${esc(IV.num)}<br>Date: ${esc(IV.date)}<br>Due: ${esc(IV.due)}</div></div>
   <div class="pcols"><div><b>${esc(b.name)||'<i>Your business name</i>'}</b><br>${L(b.info)}</div><div><b>Bill to</b><br>${L([IV.client,IV.addr,IV.email].filter(Boolean).join('\n'))||'<i>No client details</i>'}</div></div>
-  <table class="ptab"><tr><th>Description</th><th>${qHead(IV)}</th><th>Rate</th><th>Amount</th></tr>${IV.items.map(i=>`<tr><td>${esc(i.d)}</td><td>${qCell(i,IV)}</td><td>${m(i.r)}</td><td>${m(i.q*i.r)}</td></tr>`).join('')||'<tr><td colspan="4"><i>No line items</i></td></tr>'}</table>
-  <div class="ptot">${hrs(IV)>0?`<div><span>Total hours</span><span>${hrs(IV).toFixed(2)}</span></div>`:''}<div><span>Subtotal</span><span>${m(T.s)}</span></div>${IV.tax?`<div><span>Tax (${IV.tax}%)</span><span>${m(T.t)}</span></div>`:''}<div class="g"><span>Total</span><span>${m(T.g)}</span></div></div>
+  <table class="ptab"><tr><th>Description</th><th>${qHead(IV)}</th><th>Rate</th><th>Amount</th></tr>${IV.items.map(i=>`<tr><td>${esc(i.d)}</td><td>${qCell(i,IV)}</td><td>${m(i.r)}</td><td>${m(i.q*i.r)}</td></tr>`).join('')||'<tr><td colspan="4"><i>No line items</i></td></tr>'}<tr class="pst"><td>Subtotal:</td><td>${hCell(IV)}</td><td></td><td>${m(T.s)}</td></tr></table>
+  <div class="ptot">${IV.tax?`<div><span>Tax (${IV.tax}%)</span><span>${m(T.t)}</span></div>`:''}<div class="g"><span>Total:</span><span>${m(T.g)}</span></div></div>
   ${IV.notes?`<div class="pn">${L(IV.notes)}</div>`:''}
   ${ph.length?`<div class="pn"><b>Proof of work</b> (${ph.length} photo${ph.length===1?'':'s'}, on their own page in the PDF)</div><div class="phs" id="pvp"></div>`:''}
  </div>
@@ -561,11 +564,11 @@ async function makePdf(noRead){
  y+=36;d.line(14,y,196,y);y+=6;d.setFont(undefined,'bold');d.text('Description',14,y);d.text(qHead(IV),124,y,R);d.text('Rate',152,y,R);d.text('Amount',196,y,R);d.setFont(undefined,'normal');y+=4;d.line(14,y,196,y);y+=6;
  IV.items.forEach(i=>{const ln=d.splitTextToSize(i.d,90);if(y>265){d.addPage();y=20}
   d.text(ln,14,y);d.text(qCell(i,IV),124,y,R);d.text(m(i.r),152,y,R);d.text(m(i.q*i.r),196,y,R);y+=ln.length*5+2});
- y+=2;d.line(120,y,196,y);y+=6;
- if(hrs(IV)>0){d.text('Total hours',152,y,R);d.text(hrs(IV).toFixed(2),196,y,R);y+=6}
- d.text('Subtotal',152,y,R);d.text(m(T.s),196,y,R);
+ // Subtotal row: the hours total sits under the quantity column and the subtotal under Amount
+ if(y>268){d.addPage();y=20}
+ y+=2;d.line(14,y,196,y);y+=6;d.setFont(undefined,'bold');d.text('Subtotal:',14,y);if(hCell(IV))d.text(hCell(IV),124,y,R);d.text(m(T.s),196,y,R);d.setFont(undefined,'normal');
  if(IV.tax){y+=6;d.text('Tax ('+IV.tax+'%)',152,y,R);d.text(m(T.t),196,y,R)}
- y+=7;d.setFont(undefined,'bold');d.setFontSize(12);d.text('Total',152,y,R);d.text(m(T.g),196,y,R);
+ y+=7;d.setFont(undefined,'bold');d.setFontSize(12);d.text('Total:',152,y,R);d.text(m(T.g),196,y,R);
  d.setFont(undefined,'normal');d.setFontSize(10);d.text(d.splitTextToSize(IV.notes||'',180),14,y+14);
  if(IV.pics)await addPics(d);return d.output('blob')}
 
