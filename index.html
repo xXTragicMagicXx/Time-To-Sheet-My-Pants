@@ -51,7 +51,7 @@ button.go{background:var(--go)}button.stop{background:var(--stop)}
 #nav button.on{color:var(--ink);font-weight:700;box-shadow:inset 0 3px var(--acc)}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center;z-index:5}
 #modal.open{display:flex}
-#sheet{background:var(--card);width:100%;max-width:640px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:90%;overflow-y:auto}
+#sheet{background:var(--card);width:100%;max-width:640px;border-radius:18px 18px 0 0;max-height:90%;display:flex;flex-direction:column;overflow:hidden}
 .fab{position:fixed;right:18px;bottom:calc(76px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;background:var(--acc);color:var(--accink);font-size:30px;border:0;padding:0;box-shadow:0 3px 10px rgba(0,0,0,.3)}
 
 .cmh{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
@@ -98,7 +98,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset
 #nav button.on span{filter:none;opacity:1}
 #modal.open{animation:fade .18s}#modal.open #sheet{animation:up .22s ease-out}
 @keyframes fade{from{opacity:0}}@keyframes up{from{transform:translateY(28px)}}
-#sheet::before{content:'';display:block;width:40px;height:4px;border-radius:9px;background:var(--line);margin:-6px auto 12px}
+#sheet::before{content:'';display:block;flex:none;width:40px;height:4px;border-radius:9px;background:var(--line);margin:9px auto 3px}
 #toast{max-width:616px;margin:0 auto;box-shadow:0 4px 16px rgba(0,0,0,.3);font-size:15px}
 .pill{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:3px 12px;font-size:13px;font-weight:600;background:color-mix(in srgb,var(--pc) 15%,var(--card));color:var(--pc)}
 .pill i{width:8px;height:8px;border-radius:50%;background:var(--pc);animation:pulse 1.6s infinite}
@@ -129,6 +129,13 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 .seg button{flex:1;border:0;background:none;padding:8px 2px;font-size:13px;border-radius:9px;color:var(--mute);white-space:nowrap}
 .seg button.on{background:var(--acc);color:var(--accink);font-weight:600}
 .dnote{font-size:14px;color:var(--mute);font-style:italic;margin:0 2px 8px;cursor:pointer}
+.sbody{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:8px 16px 14px}
+.sbody.nof{padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+/* The sheet's action buttons stay pinned under the scrolling form */
+.sfoot{flex:none;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--card);box-shadow:0 -4px 12px rgba(0,0,0,.06)}
+.sfoot .row{gap:6px}.sfoot .row button{padding:12px 4px;white-space:nowrap}
+.stseg button{padding:12px 2px;font-size:15px}
+.stseg button.on.draft{background:#e08a00;color:#fff}.stseg button.on.sent{background:var(--stop);color:#fff}.stseg button.on.paid{background:var(--go);color:#fff}
 </style>
 </head>
 <body>
@@ -136,7 +143,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.16';
+const VER='1.17';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -325,9 +332,27 @@ function vLog(){
 
 /* ---------- invoices ---------- */
 const tot=iv=>{const s=iv.items.reduce((a,i)=>a+i.q*i.r,0),t=s*iv.tax/100;return{s,t,g:s+t}};
+// Invoice lines are hours ('h': time from entries, or set by hand) or a plain quantity ('q': expenses and extras).
+const isH=i=>i.u==='h';
+const hrs=iv=>iv.items.reduce((a,i)=>a+(isH(i)?i.q:0),0);
+// Column heading and cell text for the quantity column: Hours, Qty, or Hrs / Qty (cells then say "hrs") when both appear.
+const qHead=iv=>{const n=iv.items.filter(isH).length;return!n?'Qty':n<iv.items.length?'Hrs / Qty':'Hours'};
+const qCell=(i,iv)=>isH(i)&&qHead(iv)==='Hrs / Qty'?i.q+' hrs':String(i.q);
+// Lines saved before units existed: hours if made from an entry, quantity for expenses and anything typed by hand.
+function normUnits(){let ch=false;S.invoices.forEach(iv=>iv.items.forEach(i=>{if(i.u)return;ch=true;
+ if(i.e)i.u='h';else if(i.x||/\(expense\)$/.test(i.d||''))i.u='q';
+ else i.u=(iv.eids||[]).some(id=>{const e=S.entries.find(x=>x.id===id);return e&&(i.d||'').startsWith(dStr(e.start))})?'h':'q'}));return ch}
 const ST={draft:'Draft',sent:'Sent, unpaid',paid:'Paid'};
 const isOd=i=>i.status==='sent'&&i.due&&i.due<dayKey(Date.now());
-const invRow=i=>`<div class="item ${i.status}" data-a="openI" data-v="${i.id}"><div>${esc(i.num)}<div class="muted">${esc(i.client||(cliOf(i.clientId)||{}).name||'')} · ${i.date}${i.status==='paid'&&i.paidOn?' · paid '+i.paidOn:isOd(i)?' · due '+i.due:''}</div></div><div class="right">${money(tot(i).g)}<span class="st ${i.status}">${isOd(i)?'Overdue':ST[i.status]}</span></div></div>`;
+const invRow=i=>`<div class="item ${i.status}" data-a="invMenu" data-v="${i.id}"><div>${esc(i.num)}<div class="muted">${esc(i.client||(cliOf(i.clientId)||{}).name||'')} · ${i.date}${i.status==='paid'&&i.paidOn?' · paid '+i.paidOn:isOd(i)?' · due '+i.due:''}</div></div><div class="right">${money(tot(i).g)}<span class="st ${i.status}">${isOd(i)?'Overdue':ST[i.status]}</span></div></div>`;
+// Tapping an invoice opens this menu: change its status in one tap, or go on to edit, preview or send it.
+function invMenu(id){const iv=S.invoices.find(i=>i.id===id);if(!iv)return;const T=tot(iv),h=hrs(iv),nm=iv.client||(cliOf(iv.clientId)||{}).name||'No client';
+ openM(`<div class="between" style="margin-bottom:4px"><h3 style="margin:0">${esc(iv.num)}</h3><span class="st ${iv.status}">${isOd(iv)?'Overdue':ST[iv.status]}</span></div>
+ <div class="muted" style="margin-bottom:14px">${esc(nm)} · ${money(T.g)}${h>0?' · '+h.toFixed(2)+' hrs':''}<br>Dated ${esc(iv.date)}, due ${esc(iv.due)}${iv.status==='paid'&&iv.paidOn?', paid '+esc(iv.paidOn):''}</div>
+ <b>Status</b><div class="seg stseg" style="margin:6px 0 14px">${[['draft','Draft'],['sent','Sent'],['paid','Paid']].map(x=>`<button data-a="ivSt" data-v="${id}|${x[0]}" class="${iv.status===x[0]?'on '+x[0]:''}">${x[1]}</button>`).join('')}</div>
+ <button class="pri" data-a="openI" data-v="${id}" style="width:100%;margin-bottom:8px">Edit invoice</button>
+ <div class="row" style="margin-bottom:8px"><button data-a="imPrev" data-v="${id}">Preview</button><button data-a="imPdf" data-v="${id}">Get PDF</button></div>
+ <button data-a="close" style="width:100%">Close</button>`)}
 function vInv(){
  const L=[...S.invoices].sort((a,b)=>b.date.localeCompare(a.date)),out=L.filter(i=>i.status==='sent').reduce((a,i)=>a+tot(i).g,0);
  return`<h2>Invoices</h2><div class="card stat"><span class="muted">Sent, awaiting payment</span><b style="color:var(--stop)">${money(out)}</b>${(n=>n?`<span class="muted">${n} overdue</span>`:'')(L.filter(isOd).length)}</div>`+
@@ -345,9 +370,9 @@ function mkInv(){
 const eDesc=e=>dStr(e.start)+', '+(jobOf(e.jobId)||{name:'Work'}).name+(e.note?': '+e.note:'');
 const xDesc=x=>dStr(xMs(x))+', '+(jobOf(x.jobId)||{name:'Work'}).name+': '+(x.desc||'Expense')+' (expense)';
 function eLines(e,c){const j=jobOf(e.jobId)||{rate:0},d=eDesc(e),o={};
- if(c.r>0)o.r={d,ad:d,q:+(c.r/60).toFixed(2),r:j.rate,e:e.id,k:'r'};
- if(c.o>0)o.o={d:d+' (overtime)',ad:d+' (overtime)',q:+(c.o/60).toFixed(2),r:+(j.rate*S.settings.otMult).toFixed(2),e:e.id,k:'o'};return o}
-const xLine=x=>{const d=xDesc(x);return{d,ad:d,q:1,r:x.amt,x:x.id}};
+ if(c.r>0)o.r={d,ad:d,q:+(c.r/60).toFixed(2),r:j.rate,e:e.id,k:'r',u:'h'};
+ if(c.o>0)o.o={d:d+' (overtime)',ad:d+' (overtime)',q:+(c.o/60).toFixed(2),r:+(j.rate*S.settings.otMult).toFixed(2),e:e.id,k:'o',u:'h'};return o}
+const xLine=x=>{const d=xDesc(x);return{d,ad:d,q:1,r:x.amt,x:x.id,u:'q'}};
 function buildInv(L,X,cl){
  const C=calc(S.entries),b=S.biz,items=[];
  L.forEach(e=>{const l=eLines(e,C[e.id]);if(l.r)items.push(l.r);if(l.o)items.push(l.o)});
@@ -369,7 +394,7 @@ function syncDrafts(){
   const out=[],done=new Set();
   // i: the line as it is (or none), w: the line as the log now says (or none)
   const put=(i,w)=>{if(i&&i.man){out.push(i);return}if(!w)return;if(!i){out.push(w);return}
-   if(i.d===i.ad)i.d=w.d;i.ad=w.ad;i.q=w.q;i.r=w.r;out.push(i)};
+   if(i.d===i.ad)i.d=w.d;i.ad=w.ad;i.q=w.q;i.r=w.r;i.u=w.u;out.push(i)};
   const loose=i=>{if(i.man){delete i.e;delete i.k;delete i.x;out.push(i)}}; // its entry is gone: keep only hand-set lines
   iv.items.forEach(i=>{
    if(i.e){if(done.has(i.e))return;done.add(i.e);
@@ -422,13 +447,15 @@ function pickM(){
  <div class="pkg">${wd.map(x=>`<div class="chd">${x}</div>`).join('')}</div><div class="pkg">${cells}</div>
  <div class="lg" style="margin:8px 0 10px"><span><i class="pk"></i>Selected</span><span><i class="paid"></i>Paid</span><span><i class="sent"></i>Sent</span><span><i class="draft"></i>Draft</span></div>
  <div class="row"><button data-a="pkAll" ${inMo.length?'':'disabled'}>${allOn?'Clear month':'Whole month'}</button><button data-a="pkEvery">Everything</button></div>
- <div class="between" style="margin:12px 2px"><b>${sel.length} day${sel.length===1?'':'s'} · ${hm(sm)} h</b><b>${money(sp)}</b></div>
- <div class="row"><button data-a="${PK.into?'fBack':'close'}">${PK.into?'Back':'Cancel'}</button><button class="pri" data-a="pkGo" ${sel.length?'':'disabled'}>${PK.into?'Add to invoice':'Create invoice'}</button></div>`)}
+ `,`<div class="between" style="margin:0 2px 8px"><b>${sel.length} day${sel.length===1?'':'s'} · ${hm(sm)} h</b><b>${money(sp)}</b></div>
+ <div class="row"><button data-a="${PK.into?'fBack':'close'}">${PK.into?'Back':'Cancel'}</button><button class="pri" data-a="pkGo" ${sel.length?'':'disabled'}>${PK.into?'Add to invoice':'Create invoice'}</button></div>`,'pk')}
 function readIV(){const g=i=>$(i).value;
  Object.assign(IV,{clientId:g('#icl')||null,num:g('#in'),status:g('#is'),date:g('#id'),due:g('#iu'),client:g('#ic'),email:g('#ie'),addr:g('#ia'),tax:parseFloat(g('#it'))||0,notes:g('#inn'),pics:$('#ip').checked});
- document.querySelectorAll('[data-i]').forEach(el=>{const i=IV.items[el.dataset.i],k=el.dataset.k,v=k==='d'?el.value:(parseFloat(el.value)||0);
-  if(k!=='d'&&v!==i[k]&&(i.e||i.x))i.man=1; // an amount typed by hand stops following the log
+ document.querySelectorAll('[data-i]').forEach(el=>{const i=IV.items[el.dataset.i],k=el.dataset.k,v=k==='d'||k==='u'?el.value:(parseFloat(el.value)||0);
+  if(k!=='d'&&k!=='u'&&v!==i[k]&&(i.e||i.x))i.man=1; // an amount typed by hand stops following the log
   i[k]=v})}
+// Totals under the invoice form follow what is being typed.
+function liveIV(){if(!IV||!$('#ivT'))return;readIV();$('#ivT').textContent=money(tot(IV).g);$('#ivH').textContent=hrs(IV).toFixed(2)}
 // Saves IV (a working copy) into the invoice list; a new invoice also claims its entries and number.
 function commitIV(){if(IV.status==='paid'){if(!IV.paidOn)IV.paidOn=dayKey(Date.now())}else delete IV.paidOn;
  // claim the invoice's entries and expenses (all of them on a new invoice, newly added days on an existing one)
@@ -445,13 +472,13 @@ function prevM(){const b=S.biz,T=tot(IV),m=money,L=x=>esc(x||'').replace(/\n/g,'
  <div class="paper">
   <div class="between" style="align-items:flex-start"><div class="pt">INVOICE</div><div style="text-align:right">#${esc(IV.num)}<br>Date: ${esc(IV.date)}<br>Due: ${esc(IV.due)}</div></div>
   <div class="pcols"><div><b>${esc(b.name)||'<i>Your business name</i>'}</b><br>${L(b.info)}</div><div><b>Bill to</b><br>${L([IV.client,IV.addr,IV.email].filter(Boolean).join('\n'))||'<i>No client details</i>'}</div></div>
-  <table class="ptab"><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>${IV.items.map(i=>`<tr><td>${esc(i.d)}</td><td>${i.q}</td><td>${m(i.r)}</td><td>${m(i.q*i.r)}</td></tr>`).join('')||'<tr><td colspan="4"><i>No line items</i></td></tr>'}</table>
-  <div class="ptot"><div><span>Subtotal</span><span>${m(T.s)}</span></div>${IV.tax?`<div><span>Tax (${IV.tax}%)</span><span>${m(T.t)}</span></div>`:''}<div class="g"><span>Total</span><span>${m(T.g)}</span></div></div>
+  <table class="ptab"><tr><th>Description</th><th>${qHead(IV)}</th><th>Rate</th><th>Amount</th></tr>${IV.items.map(i=>`<tr><td>${esc(i.d)}</td><td>${qCell(i,IV)}</td><td>${m(i.r)}</td><td>${m(i.q*i.r)}</td></tr>`).join('')||'<tr><td colspan="4"><i>No line items</i></td></tr>'}</table>
+  <div class="ptot">${hrs(IV)>0?`<div><span>Total hours</span><span>${hrs(IV).toFixed(2)}</span></div>`:''}<div><span>Subtotal</span><span>${m(T.s)}</span></div>${IV.tax?`<div><span>Tax (${IV.tax}%)</span><span>${m(T.t)}</span></div>`:''}<div class="g"><span>Total</span><span>${m(T.g)}</span></div></div>
   ${IV.notes?`<div class="pn">${L(IV.notes)}</div>`:''}
   ${ph.length?`<div class="pn"><b>Proof of work</b> (${ph.length} photo${ph.length===1?'':'s'}, on their own page in the PDF)</div><div class="phs" id="pvp"></div>`:''}
  </div>
  ${b.name?'':'<div class="muted" style="margin-bottom:10px">Your business name and details are empty. Add them under Settings, Invoice details.</div>'}
- <div class="row"><button data-a="fBack">Back to edit</button><button class="pri" data-a="ivPdf" data-v="p">Get PDF</button></div>`);
+ `,`<div class="row"><button data-a="fBack">Back to edit</button><button class="pri" data-a="ivPdf" data-v="p">Get PDF</button></div>`);
  const el=$('#pvp');if(el)(async()=>{for(const id of ph){const u=await pGet(id).catch(()=>null);if(u&&el.isConnected){const d=document.createElement('div');d.className='ph';d.innerHTML='<img src="'+u+'">';el.appendChild(d)}}})()}
 function invM(){const T=tot(IV);
  openM(`<h3>${IV.isNew?'New invoice':'Invoice '+esc(IV.num)}</h3>
@@ -459,13 +486,11 @@ function invM(){const T=tot(IV);
  <div class="row"><label>Date<input type="date" id="id" value="${IV.date}"></label><label>Due<input type="date" id="iu" value="${IV.due}"></label></div>
  <label>Client<select id="icl"><option value="">No client</option>${cliOpts(IV.clientId)}</select></label><label>Bill to<input id="ic" value="${esc(IV.client)}"></label><label>Client email<input id="ie" type="email" value="${esc(IV.email)}"></label>
  <label>Client address<textarea id="ia" rows="2">${esc(IV.addr)}</textarea></label><b>Line items</b>
- ${IV.items.map((i,n)=>`<div class="card" style="margin:8px 0"><input data-i="${n}" data-k="d" value="${esc(i.d)}">${IV.status==='draft'&&(i.e||i.x)?`<div class="muted" style="font-size:12px;margin:-6px 0 6px">${i.man?'Amount set by hand. It no longer follows your log.':'Follows your log while this is a draft.'}</div>`:''}<div class="row"><label>Hours / qty<input type="number" step="0.01" data-i="${n}" data-k="q" value="${i.q}"></label><label>Rate<input type="number" step="0.01" data-i="${n}" data-k="r" value="${i.r}"></label><button class="danger" data-a="ivDel" data-v="${n}" style="flex:0 0 auto">✕</button></div></div>`).join('')}
+ ${IV.items.map((i,n)=>`<div class="card" style="margin:8px 0"><input data-i="${n}" data-k="d" value="${esc(i.d)}">${IV.status==='draft'&&(i.e||i.x)?`<div class="muted" style="font-size:12px;margin:-6px 0 6px">${i.man?'Amount set by hand. It no longer follows your log.':'Follows your log while this is a draft.'}</div>`:''}<div class="row">${i.e||i.x?'':`<label style="flex:0 0 84px">Unit<select data-i="${n}" data-k="u"><option value="h" ${isH(i)?'selected':''}>Hours</option><option value="q" ${isH(i)?'':'selected'}>Qty</option></select></label>`}<label>${isH(i)?'Hours':'Qty'}<input type="number" step="0.01" data-i="${n}" data-k="q" value="${i.q}"></label><label>Rate<input type="number" step="0.01" data-i="${n}" data-k="r" value="${i.r}"></label><button class="danger" data-a="ivDel" data-v="${n}" style="flex:0 0 auto">✕</button></div></div>`).join('')}
  ${IV.status==='draft'?`<div class="row" style="margin-bottom:10px"><button data-a="ivDays">Add more days</button><button data-a="ivAdd">Add blank line</button></div>`:`<button data-a="ivAdd" style="width:100%;margin-bottom:10px">Add line</button>`}
  <label>Tax (%)<input type="number" step="0.01" id="it" value="${IV.tax}"></label><label>Notes / payment details<textarea id="inn" rows="3">${esc(IV.notes)}</textarea></label>
- <label class="chk"><input type="checkbox" id="ip" ${IV.pics?'checked':''}>Add work and receipt photos to the PDF (${[...S.entries.filter(e=>(IV.eids||[]).includes(e.id)),...S.expenses.filter(x=>(IV.xids||[]).includes(x.id))].reduce((a,e)=>a+(e.photos||[]).length,0)} available)</label><div class="between"><b>Total</b><b>${money(T.g)}</b></div>
- <div class="row" style="margin-top:12px"><button data-a="close">Close</button><button class="pri" data-a="ivSave">Save</button></div>
- <div class="row" style="margin-top:8px"><button data-a="ivPrev">Preview</button><button data-a="ivPdf">Get PDF</button></div>
- ${IV.isNew?'':'<button class="danger" data-a="ivDelete" style="width:100%;margin-top:8px">Delete invoice</button>'}`)}
+ <label class="chk"><input type="checkbox" id="ip" ${IV.pics?'checked':''}>Add work and receipt photos to the PDF (${[...S.entries.filter(e=>(IV.eids||[]).includes(e.id)),...S.expenses.filter(x=>(IV.xids||[]).includes(x.id))].reduce((a,e)=>a+(e.photos||[]).length,0)} available)</label><div class="between" style="margin-top:4px"><span>Total hours</span><b id="ivH">${hrs(IV).toFixed(2)}</b></div><div class="between"><b>Total</b><b id="ivT">${money(T.g)}</b></div>
+ ${IV.isNew?'':'<button class="danger" data-a="ivDelete" style="width:100%;margin-top:12px">Delete invoice</button>'}`,`<div class="row"><button data-a="close">Close</button><button data-a="ivPrev">Preview</button><button data-a="ivPdf">Get PDF</button><button class="pri" data-a="ivSave">Save</button></div>`,'iv')}
 let DBP=null;
 const idb=()=>DBP||(DBP=new Promise((ok,no)=>{const r=indexedDB.open('ts_photos',1);r.onupgradeneeded=()=>r.result.createObjectStore('p');r.onsuccess=()=>ok(r.result);r.onerror=()=>{DBP=null;no(r.error)}}));
 const pPut=async(k,v)=>{const d=await idb();return new Promise((ok,no)=>{const t=d.transaction('p','readwrite');t.objectStore('p').put(v,k);t.oncomplete=ok;t.onerror=no})};
@@ -514,7 +539,7 @@ const pv=()=>{const e=rowToEntry(IMP.rows[0],IMP.M);return e?'First row reads as
 function impM(){openM(`<h3>Import from CSV</h3><div class="muted" style="margin-bottom:8px">${IMP.rows.length} rows found. Check that each field points at the right column.</div>
  ${FL.map(x=>`<label>${x[1]}<select data-m="${x[0]}"><option value="-1">(none)</option>${IMP.head.map((h,i)=>`<option value="${i}" ${IMP.M[x[0]]===i?'selected':''}>${esc(h)}</option>`).join('')}</select></label>`).join('')}
  <label>Project for rows without one<select id="imj">${jobOpts(defJob())}</select></label><div class="muted" id="ipv" style="margin-bottom:10px">${pv()}</div>
- <div class="row"><button data-a="close">Cancel</button><button class="pri" data-a="doImp">Import</button></div>`)}
+ `,`<div class="row"><button data-a="close">Cancel</button><button class="pri" data-a="doImp">Import</button></div>`)}
 function doImport(){
  const M=IMP.M,dj=$('#imj').value,pal=['#1f8f5f','#3b82c9','#c93b8c','#8a5cd6','#e08a00','#2aa7a7'],seen=new Set(S.entries.map(e=>e.jobId+'|'+e.start+'|'+e.end));let ok=0,sk=0,dup=0,np=0,nc=0;
  IMP.rows.forEach(r=>{const e=rowToEntry(r,M);if(!e){sk++;return}
@@ -533,10 +558,12 @@ async function makePdf(noRead){
  d.setFontSize(22);d.text('INVOICE',14,y);d.setFontSize(10);d.text(['#'+IV.num,'Date: '+IV.date,'Due: '+IV.due],196,y-8,R);
  y+=12;d.setFont(undefined,'bold');d.text(b.name||'',14,y);d.text('Bill to',120,y);d.setFont(undefined,'normal');
  d.text(d.splitTextToSize(b.info||'',80),14,y+5);d.text(d.splitTextToSize([IV.client,IV.addr,IV.email].filter(Boolean).join('\n'),76),120,y+5);
- y+=36;d.line(14,y,196,y);y+=6;d.setFont(undefined,'bold');d.text('Description',14,y);d.text('Qty',120,y,R);d.text('Rate',152,y,R);d.text('Amount',196,y,R);d.setFont(undefined,'normal');y+=4;d.line(14,y,196,y);y+=6;
- IV.items.forEach(i=>{const ln=d.splitTextToSize(i.d,95);if(y>265){d.addPage();y=20}
-  d.text(ln,14,y);d.text(String(i.q),120,y,R);d.text(m(i.r),152,y,R);d.text(m(i.q*i.r),196,y,R);y+=ln.length*5+2});
- y+=2;d.line(120,y,196,y);y+=6;d.text('Subtotal',152,y,R);d.text(m(T.s),196,y,R);
+ y+=36;d.line(14,y,196,y);y+=6;d.setFont(undefined,'bold');d.text('Description',14,y);d.text(qHead(IV),124,y,R);d.text('Rate',152,y,R);d.text('Amount',196,y,R);d.setFont(undefined,'normal');y+=4;d.line(14,y,196,y);y+=6;
+ IV.items.forEach(i=>{const ln=d.splitTextToSize(i.d,90);if(y>265){d.addPage();y=20}
+  d.text(ln,14,y);d.text(qCell(i,IV),124,y,R);d.text(m(i.r),152,y,R);d.text(m(i.q*i.r),196,y,R);y+=ln.length*5+2});
+ y+=2;d.line(120,y,196,y);y+=6;
+ if(hrs(IV)>0){d.text('Total hours',152,y,R);d.text(hrs(IV).toFixed(2),196,y,R);y+=6}
+ d.text('Subtotal',152,y,R);d.text(m(T.s),196,y,R);
  if(IV.tax){y+=6;d.text('Tax ('+IV.tax+'%)',152,y,R);d.text(m(T.t),196,y,R)}
  y+=7;d.setFont(undefined,'bold');d.setFontSize(12);d.text('Total',152,y,R);d.text(m(T.g),196,y,R);
  d.setFont(undefined,'normal');d.setFontSize(10);d.text(d.splitTextToSize(IV.notes||'',180),14,y+14);
@@ -611,7 +638,12 @@ function vSet(){if(setV==='proj')return vProj();const s=S.settings,na=S.jobs.fil
  <p class="muted center">Timesheet v${VER}${NA?' · Android app '+esc(NA.version()):''}. Data is stored on this device only.</p>`}
 
 /* ---------- modals ---------- */
-const openM=h=>{$('#sheet').innerHTML=h;if(!$('#modal').classList.contains('open')&&!(history.state&&history.state.m))history.pushState({m:1},'');$('#modal').classList.add('open');const ph=$('#ph');if(ph)showPh(ph,EP)};
+// openM(body, pinned buttons, key): the buttons stay fixed under the scrolling body. Re-opening a sheet with the same key
+// (e.g. the invoice form after Add line) keeps its scroll position; a different sheet starts at the top.
+const openM=(h,f,key)=>{const sh=$('#sheet'),was=$('#modal').classList.contains('open'),keep=was&&!!key&&sh.dataset.key===key,top=keep?sh.querySelector('.sbody').scrollTop:0;
+ sh.innerHTML=`<div class="sbody${f?'':' nof'}">${h}</div>`+(f?`<div class="sfoot">${f}</div>`:'');sh.dataset.key=key||'';
+ if(!was&&!(history.state&&history.state.m))history.pushState({m:1},'');
+ $('#modal').classList.add('open');if(keep)sh.querySelector('.sbody').scrollTop=top;const ph=$('#ph');if(ph)showPh(ph,EP)};
 let AK=null;
 function ask(msg,label,fn){AK=fn;openM('<h3>'+esc(msg)+'</h3><div class="row"><button data-a="close">Cancel</button><button class="danger" data-a="askOk">'+label+'</button></div>')}
 function say(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.textContent=m;t.style.display='block';clearTimeout(say.h);say.h=setTimeout(()=>t.style.display='none',3500+m.length*40)}
@@ -635,8 +667,7 @@ function entryM(id,day,fin){curX=null;EP=id?[...(S.entries.find(x=>x.id===id).ph
  <label>End<input type="datetime-local" id="me" value="${toLocal(e.end)}"></label>
  <label>Break (minutes)<input type="number" min="0" id="mb" value="${e.brk||0}"></label>
  <label>Note<input id="mn" value="${esc(e.note)}"></label><label>Tags<input id="mt" value="${esc((e.tags||[]).join(', '))}"></label><div style="margin-bottom:10px">${tagChips('mt')}</div><label>Location<input id="ml" value="${esc(LOC&&LOC.addr||'')}" placeholder="Address or place name"></label><div id="lc" style="margin:-2px 0 12px">${locUI()}</div><label>Photos of work done<input type="file" id="pf" accept="image/*" multiple></label><div class="phs" id="ph"></div>
- <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delE" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveE" data-v="${id||''}">Save</button></div>
- ${id?`<button data-a="cpOpen" data-v="${id}" style="width:100%;margin-top:8px">Copy to other days</button>`:''}`)}
+ ${id?`<button data-a="cpOpen" data-v="${id}" style="width:100%;margin-top:4px">Copy to other days</button>`:''}`,`<div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delE" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveE" data-v="${id||''}">Save</button></div>`)}
 
 /* ---------- location ---------- */
 const getPos=()=>new Promise((ok,no)=>{if(!navigator.geolocation)return no({code:0});navigator.geolocation.getCurrentPosition(p=>ok({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6)}),no,{enableHighAccuracy:true,timeout:20000,maximumAge:60000})});
@@ -664,7 +695,7 @@ function expM(id,day){curE=null;curX=id||null;const x=id?S.expenses.find(y=>y.id
  <label>What was it for<input id="xn" value="${esc(x.desc)}" placeholder="Timber, screws, paint"></label>
  <label class="chk"><input type="checkbox" id="xb" ${xBill(x)?'checked':''}>Bill this to the client</label>
  <label>Receipt photos<input type="file" id="pf" accept="image/*" multiple></label><div class="phs" id="ph"></div>
- <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delX" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveX" data-v="${id||''}">Save</button></div>`)}
+ `,`<div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delX" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveX" data-v="${id||''}">Save</button></div>`)}
 // Most recent day before k that has entries.
 function lastDay(k){let b='';S.entries.forEach(e=>{const d=dayKey(e.start);if(d<k&&d>b)b=d});return b}
 const repLbl=(src,to)=>{const L=S.entries.filter(e=>dayKey(e.start)===src);return`Copy ${dStr(new Date(src+'T00:00').getTime())} to ${to} (${L.length} entr${L.length===1?'y':'ies'}, ${hm(L.reduce((a,e)=>a+mins(e),0))})`};
@@ -675,7 +706,7 @@ function copyTo(e,k){const a=new Date(e.start),d=new Date(k+'T00:00');d.setHours
 function copyM(id){const e=S.entries.find(x=>x.id===id),own=dayKey(e.start),d=wkStart(e.start);let h='';
  for(let i=0;i<21;i++){const k=dayKey(+d);h+=`<button class="dc" ${k===own?'disabled':''} data-a="cpT" data-v="${k}">${d.toLocaleDateString([],{weekday:'short'})}<b>${d.getDate()}</b></button>`;d.setDate(d.getDate()+1)}
  openM(`<h3>Copy to other days</h3><div class="muted" style="margin-bottom:10px">Tap the days that should get the same project, times, break, note, tags and location.</div><div class="dcs">${h}</div>
- <div class="row" style="margin-top:12px"><button data-a="editE" data-v="${id}">Back</button><button class="pri" data-a="cpGo" data-v="${id}">Copy</button></div>`)}
+ `,`<div class="row"><button data-a="editE" data-v="${id}">Back</button><button class="pri" data-a="cpGo" data-v="${id}">Copy</button></div>`)}
 // Validates and stores the entry sheet; false (with a message) if the times are wrong.
 function putE(v){const s=new Date($('#ms').value).getTime(),e=new Date($('#me').value).getTime();
  if(!s||!e||e<=s){say('End time must be after start time.');return false}
@@ -691,8 +722,7 @@ function dayM(k){
  <label>Note for this day<textarea rows="2" data-dn="${k}" placeholder="Rained off, waiting on materials, day off…">${esc(S.dayNotes[k]||'')}</textarea></label>
  ${L.length||X.length?L.map(e=>{const j=jobOf(e.jobId),c=C[e.id];return`<div class="item" data-a="editE" data-v="${e.id}"><div><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'Deleted project')}<div class="muted">${tStr(e.start)} to ${tStr(e.end)}${e.note?`<br>${esc(e.note)}`:''}</div></div><div class="right">${hm(c.m)}<div class="muted">${money(c.pay)}</div>${(i=>i?`<span class="st ${i.status}">${ST[i.status]}</span>`:'<span class="muted">Not invoiced</span>')(S.invoices.find(i=>i.id===e.inv))}</div></div>`}).join('')+X.map(xRow).join(''):'<div class="muted">Nothing on this day.</div>'}
  ${src?`<button data-a="rep" data-v="${k}" style="width:100%;margin-top:14px">${repLbl(src,'this day')}</button>`:''}
- <div class="row" style="margin-top:${src?8:14}px"><button data-a="addXd" data-v="${k}">Add expense</button><button class="pri" data-a="addD" data-v="${k}">Add entry</button></div>
- <button data-a="close" style="width:100%;margin-top:8px">Close</button>`)}
+ `,`<div class="row"><button data-a="close">Close</button><button data-a="addXd" data-v="${k}">Add expense</button><button class="pri" data-a="addD" data-v="${k}">Add entry</button></div>`)}
 
 function jobM(id,cid){
  const j=id?jobOf(id):{name:'',rate:0,color:newColor(),clientId:cid||null};
@@ -702,8 +732,7 @@ function jobM(id,cid){
  <label>Hourly rate<input type="number" min="0" step="0.01" id="jr" value="${j.rate}"></label>
  <label>Color</label><div class="row" style="margin-bottom:6px"><input type="color" id="jc" value="${j.color}" style="margin:0;height:46px;padding:4px"><button data-a="jcRnd" style="flex:0 0 auto">🎲 Another</button></div>
  ${id?'':'<div class="muted" style="margin-bottom:10px">Picked for you so it stands apart from your other projects.</div>'}
- <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delJ" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveJ" data-v="${id||''}">Save</button></div>
- ${id?`<button data-a="archJ" data-v="${id}" style="width:100%;margin-top:8px">${j.arch?'Restore to active projects':'Archive (project finished)'}</button>`:''}`)}
+ ${id?`<button data-a="archJ" data-v="${id}" style="width:100%;margin-top:6px">${j.arch?'Restore to active projects':'Archive (project finished)'}</button>`:''}`,`<div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delJ" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveJ" data-v="${id||''}">Save</button></div>`)}
 
 function cliM(id){const c=id?cliOf(id):{name:'',email:'',phone:'',addr:'',notes:''};
  openM(`<h3>${id?'Edit client':'Add client'}</h3>
@@ -712,7 +741,7 @@ function cliM(id){const c=id?cliOf(id):{name:'',email:'',phone:'',addr:'',notes:
  <label>Phone<input id="cp" type="tel" value="${esc(c.phone)}"></label>
  <label>Address<textarea id="ca" rows="2">${esc(c.addr)}</textarea></label>
  <label>Notes<textarea id="co" rows="2">${esc(c.notes)}</textarea></label>
- <div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delC" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveC" data-v="${id||''}">Save</button></div>`)}
+ `,`<div class="row"><button data-a="close">Cancel</button>${id?`<button class="danger" data-a="delC" data-v="${id}">Delete</button>`:''}<button class="pri" data-a="saveC" data-v="${id||''}">Save</button></div>`)}
 
 /* ---------- clients ---------- */
 function newCli(n){const c={id:uid(),name:n,email:'',phone:'',addr:'',notes:''};S.clients.push(c);return c}
@@ -797,7 +826,15 @@ const A={
  addE(){entryM()},askOk(){const f=AK;AK=null;closeM();if(f)f()},brk(){const r=S.running,n=Date.now();if(r.brkStart){r.brkMs+=n-r.brkStart;r.brkStart=null}else r.brkStart=n;save();render()},doImp(){doImport()},rmPh(v){EP=EP.filter(x=>x!==v);pDel(v);syncP();showPh($('#ph'),EP)},addTag(v,el){const i=$('#'+el.dataset.t),c=parseTags(i.value);if(!c.includes(v))c.push(v);i.value=c.join(', ')},
  clrF(){F={job:'',cl:'',tag:'',from:'',to:'',q:'',st:'all'};render()},togF(){FO=!FO;$('#fp').style.display=FO?'':'none';$('#fb').textContent=fLbl()},csvF(){dl('timesheet-filtered.csv',csv(filt(),filtX()),'text/csv')},mkInv(){mkInv()},
  openI(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));invM()},
- ivAdd(){readIV();IV.items.push({d:'',q:1,r:0});invM()},ivDel(v){readIV();const it=IV.items.splice(+v,1)[0];
+ invMenu(v){invMenu(v)},
+ imPrev(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));prevM()},
+ imPdf(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));A.ivPdf('p')},
+ ivSt(v){const [id,st]=v.split('|'),iv=S.invoices.find(i=>i.id===id);if(!iv||iv.status===st)return;
+  const go=done=>{iv.status=st;if(st==='paid'){if(!iv.paidOn)iv.paidOn=dayKey(Date.now())}else delete iv.paidOn;save();if(!done)closeM();render();
+   say(iv.num+' marked '+({draft:'as draft',sent:'sent, unpaid',paid:'paid'})[st]+'.'+(st==='draft'&&SYN.includes(iv.num)?' Its lines were updated from your log.':''))};
+  // a draft follows the log, so moving a sent or paid invoice back to draft can change what the client was shown
+  if(st==='draft')ask('Move '+iv.num+' back to draft? Drafts update to match your log, so its lines and total may change.','Move to draft',()=>go(true));else go()},
+ ivAdd(){readIV();IV.items.push({d:'',q:1,r:0,u:'q'});invM()},ivDel(v){readIV();const it=IV.items.splice(+v,1)[0];
   if(it.e&&!IV.items.some(i=>i.e===it.e))IV.eids=IV.eids.filter(x=>x!==it.e);if(it.x)IV.xids=(IV.xids||[]).filter(x=>x!==it.x);invM()},
  ivSave(){readIV();commitIV();closeM();render()},
  fShare(){navigator.share({files:[FM.f],title:FM.title,text:FM.txt}).catch(e=>{if(e.name!=='AbortError')say('Sharing failed. Use Save to device instead.')})},
@@ -869,9 +906,10 @@ document.addEventListener('click',ev=>{
 document.addEventListener('change',ev=>{
  const t=ev.target;
  if(t.id==='rf'&&t.files[0]){const f=new FileReader();f.onload=()=>{try{const d=JSON.parse(f.result);if(!Array.isArray(d.jobs)||!Array.isArray(d.entries))throw 0;
-  ask('Replace current data with this backup?','Replace',async()=>{const P=d.photoData||{};delete d.photoData;for(const k in P)await pPut(k,P[k]).catch(()=>{});localStorage.setItem(KEY,JSON.stringify(d));S=load();render();say('Backup restored.')})}catch(e){say('That file is not a valid Timesheet backup.')}};f.readAsText(t.files[0]);return}
+  ask('Replace current data with this backup?','Replace',async()=>{const P=d.photoData||{};delete d.photoData;for(const k in P)await pPut(k,P[k]).catch(()=>{});localStorage.setItem(KEY,JSON.stringify(d));S=load();if(normUnits())store();render();say('Backup restored.')})}catch(e){say('That file is not a valid Timesheet backup.')}};f.readAsText(t.files[0]);return}
  if(t.id==='pf'){addPhotos(t.files);return}
  if(t.id==='pkc'){pickOpen(t.value);return}
+ if(t.dataset.k==='u'&&t.dataset.i!==undefined){readIV();invM();return}
  if(t.dataset.dn){render();say(S.dayNotes[t.dataset.dn]?'Day note saved.':'Day note removed.');return}
  if(t.id==='icl'){const c=cliOf(t.value);if(c){$('#ic').value=c.name;$('#ie').value=c.email;$('#ia').value=c.addr}return}
  if(t.dataset.m){IMP.M[t.dataset.m]=parseInt(t.value);$('#ipv').textContent=pv();return}
@@ -883,6 +921,7 @@ document.addEventListener('change',ev=>{
 const fl=t=>{F[t.dataset.f]=t.value;const r=$('#res'),b=$('#fb');if(r)r.innerHTML=resHtml();if(b)b.textContent=fLbl()};
 document.addEventListener('input',ev=>{const t=ev.target;if(t.dataset.f)fl(t);
  else if(t.id==='pq'){PQ=t.value;$('#pl').innerHTML=projList()}
+ else if(t.dataset.i!==undefined||t.id==='it')liveIV()
  // day notes are stored as they are typed, so closing the sheet any way keeps them
  else if(t.dataset.dn){const v=t.value.trim();if(v)S.dayNotes[t.dataset.dn]=v;else delete S.dayNotes[t.dataset.dn];store()}});
 let TK=0;setInterval(()=>{const c=$('#clock');if(c&&S.running){c.textContent=hms(workMs(S.running));if(++TK%30===0)$('#tstats').innerHTML=tStats()}},1000);
@@ -890,6 +929,7 @@ let TK=0;setInterval(()=>{const c=$('#clock');if(c&&S.running){c.textContent=hms
 const QP=new URLSearchParams(location.search),qi=QP.get('inv'),qt=QP.get('tab');
 if(TABS.some(t=>t[0]===qt))tab=qt;if(qi&&S.invoices.some(i=>i.id===qi))tab='inv';
 if(location.search)history.replaceState(null,'',location.pathname);
+if(normUnits())store();
 render();if(tab==='inv'&&qi&&S.invoices.some(i=>i.id===qi))A.openI(qi);
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
