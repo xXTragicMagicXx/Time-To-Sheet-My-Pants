@@ -138,6 +138,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 .sfoot .row{gap:6px}.sfoot .row button{padding:12px 4px;white-space:nowrap}
 .stseg button{padding:12px 2px;font-size:15px}
 .stseg button.on.draft{background:#e08a00;color:#fff}.stseg button.on.sent{background:var(--stop);color:#fff}.stseg button.on.paid{background:var(--go);color:#fff}
+.card.warn{border-color:var(--stop);box-shadow:inset 4px 0 var(--stop)}
 </style>
 </head>
 <body>
@@ -145,7 +146,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.19';
+const VER='1.20';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -153,7 +154,7 @@ const p2=n=>String(n).padStart(2,'0');
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 function def(){return{jobs:[{id:uid(),name:'General',rate:0,color:'#f2a900',clientId:null}],clients:[],entries:[],expenses:[],dayNotes:{},running:null,lastJob:null,lastBk:0,invoices:[],biz:{name:'',info:'',pay:'',prefix:'INV-',next:1,terms:14,tax:0},
- settings:{round:0,otDaily:0,otWeekly:0,otMult:1.5,weekStart:1,cur:'$',period:'weekly',anchor:'2024-01-01',geo:1,addr:0,theme:'system',sumV:'period'}}}
+ settings:{round:0,otDaily:0,otWeekly:0,otMult:1.5,weekStart:1,cur:'$',period:'weekly',anchor:'2024-01-01',geo:1,addr:0,theme:'system',sumV:'period',warnH:10}}}
 // Data saved before v1.8 kept client name/email/address on each project ("job").
 // Turn those into real clients (merging same-named ones) and link invoices to them by name.
 function migrate(D){
@@ -236,7 +237,8 @@ function applyTheme(){const t=S.settings.theme,h=document.documentElement;if(t==
  const m=document.querySelector('meta[name=theme-color]');if(m)m.content=getComputedStyle(h).getPropertyValue('--acc').trim()||'#f2a900';
  if(NA&&NA.bars){const c=getComputedStyle(h),bg=c.getPropertyValue('--bg').trim();NA.bars(bg,c.getPropertyValue('--card').trim(),bg==='#11161c')}}
 function render(){applyTheme();
- $('#nav').innerHTML=TABS.map(t=>`<button data-a="tab" data-v="${t[0]}" class="${tab===t[0]?'on':''}"><span>${t[2]}</span>${t[1]}</button>`).join('');
+ // the tab bar is only rebuilt when it changes: replacing it mid-tap (e.g. leaving a Settings field) swallowed the tap
+ const nv=TABS.map(t=>`<button data-a="tab" data-v="${t[0]}" class="${tab===t[0]?'on':''}"><span>${t[2]}</span>${t[1]}</button>`).join(''),nb=$('#nav');if(nb.dataset.h!==nv){nb.innerHTML=nv;nb.dataset.h=nv}
  $('#main').innerHTML=({timer:vTimer,cal:vCal,log:vLog,inv:vInv,cli:vCli,sum:vSum,set:vSet})[tab]();
 }
 // Project <option>s. Archived projects are left out unless one is the current value, or all is set (filters).
@@ -253,10 +255,36 @@ function newColor(){const hs=S.jobs.filter(j=>!j.arch).map(j=>hueOf(j.color)).fi
 const cliOpts=sel=>[...S.clients].sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${c.id===sel?'selected':''}>${esc(c.name)}</option>`).join('');
 
 const workMs=r=>(r.brkStart||Date.now())-r.start-r.brkMs;
+/* ---------- forgotten timer ---------- */
+// A timer counts as forgotten once it has run (since Start, breaks included) for longer than the Settings limit; "Keep going" snoozes it for 2 hours.
+const stale=()=>{const r=S.running,h=+S.settings.warnH;return!!r&&h>0&&Date.now()-r.start>=h*36e5&&!(r.snz&&r.snz>Date.now())};
+function stCard(){if(!stale())return'';const r=S.running,j=jobOf(r.jobId);
+ return`<div class="card warn" id="stl"><b>Did you forget to stop the timer?</b><div class="muted" style="margin:4px 0 12px">${esc(j?j.name:'Your timer')} has been running ${hm((Date.now()-r.start)/60000)} since ${esc(dStr(r.start))}, ${esc(tStr(r.start))}${r.brkStart?' (on break now)':''}.</div>
+ <button class="pri" style="width:100%;margin-bottom:8px" data-a="stopAt">Stop at a time I choose</button>
+ <div class="row"><button data-a="stop">Stop now</button><button data-a="snooze">Keep going</button></div></div>`}
+function stopAtM(){const r=S.running,now=Date.now();
+ openM(`<h3>Stop the timer at…</h3><div class="muted" style="margin-bottom:10px">It started ${esc(dStr(r.start))}, ${esc(tStr(r.start))}. Pick when you actually finished and the entry will end then.</div>
+ <label>Stopped at<input type="datetime-local" id="sa" value="${toLocal(now)}" min="${toLocal(r.start)}" max="${toLocal(now)}"></label>
+ <div class="muted">Break time already recorded is kept. You can change it on the next screen.</div>`,
+ `<div class="row"><button data-a="close">Cancel</button><button class="pri" data-a="stopAtGo">Stop timer</button></div>`)}
+// Ends the running timer at time n (ms) and opens the entry sheet. Break time can't exceed the entry's length.
+function finishTimer(n){const r=S.running;if(!r)return;const id=uid(),bm=Math.min(r.brkMs+(r.brkStart?Math.max(0,n-r.brkStart):0),Math.max(0,n-r.start));
+ S.entries.push({id,jobId:r.jobId,start:r.start,end:n,brk:Math.round(bm/60000),note:'',tags:[],loc:r.loc||null});S.running=null;save();render();pushTimer();entryM(id,null,true)}
+/* ---------- Android app extras (no-ops in a browser) ---------- */
+// Tells the Android app about the timer so it can show a notification and a "still running" alert.
+function pushTimer(){if(!NA||!NA.timer)return;const r=S.running,j=r&&jobOf(r.jobId);
+ try{NA.timer(JSON.stringify(r?{on:1,name:j?j.name:'Timer',start:r.start,brkStart:r.brkStart||0,brkMs:r.brkMs||0,warnH:+S.settings.warnH||0,snz:r.snz||0}:{on:0}))}catch(e){}}
+// A newer Android app version, when the app has found one: {v: new version, cur: this version, url}.
+let UPD=null;
+function setUpd(j){try{UPD=j?JSON.parse(j):null}catch(e){UPD=null}const a=document.activeElement;
+ if((tab==='timer'||(tab==='set'&&!setV))&&!(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))&&!$('#modal').classList.contains('open'))render()}
+window.onAppUpdate=j=>setUpd(j);
+window.onUpdateChecked=st=>say(st==='none'?'You have the latest version.':st==='new'?'An update is available.':'Could not check for updates. Are you online?');
+const updCard=()=>UPD?`<div class="card" style="border-color:var(--acc);box-shadow:inset 4px 0 var(--acc)"><b>App update available</b><div class="muted" style="margin:4px 0 10px">Version ${esc(UPD.v)} is ready (you have ${esc(UPD.cur)}). Android asks you to confirm the install once, and your data is kept.</div><button class="pri" style="width:100%" data-a="updGo">Download and install</button></div>`:'';
 function vTimer(){
  const r=S.running,j=r&&jobOf(r.jobId),C=calc(S.entries),t0=new Date();t0.setHours(0,0,0,0);
 
- return`<h2>Timesheet</h2>
+ return`<h2>Timesheet</h2>${stCard()}${updCard()}
  <div class="card center">${r?`<span class="pill ${r.brkStart?'brk':'run'}"><i></i>${r.brkStart?'On break':'Working'}</span>`:''}<div class="clock${r&&r.brkStart?' dim':''}" id="clock">${r?hms(workMs(r)):'00:00:00'}</div>
  ${r?`<div class="muted" style="margin-bottom:10px"><span class="dot" style="background:${j?j.color:'#999'}"></span>${esc(j?j.name:'')}, started ${tStr(r.start)}${r.brkStart?' · on break since '+tStr(r.brkStart):r.brkMs?' · '+Math.round(r.brkMs/60000)+'m break so far':''}${r.loc?`<br>📍 ${esc(r.loc.addr||'Location saved')}`:''}</div>`
  :`<select id="tj">${jobOpts(defJob())}</select>`}
@@ -637,6 +665,9 @@ function vSet(){if(setV==='proj')return vProj();const s=S.settings,na=S.jobs.fil
  <div class="card" data-a="projOpen" style="cursor:pointer"><div class="between"><div><b>Projects and rates</b><div class="muted">${S.jobs.length-na} active${na?', '+na+' archived':''}</div></div><span style="font-size:24px;color:var(--mute)">›</span></div></div>
  <div class="card"><b>Appearance</b><br><br>
  <label>Theme<select data-s="theme">${[['system','Match my phone'],['light','Light'],['dark','Dark']].map(x=>`<option value="${x[0]}" ${s.theme===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></label></div>
+ <div class="card"><b>Timer</b><br><br>
+ <label>Warn me when a timer has run longer than (hours, 0 = off)<input type="number" min="0" step="0.5" data-s="warnH" value="${s.warnH}"></label>
+ <div class="muted">If you forget to stop it, the Timer screen asks whether to stop it at the time you really finished${NA&&NA.timer?', and the Android app sends you a notification':''}.</div></div>
  <div class="card"><b>Location</b><br><br>
  <label>Save where I am when I press Start<select data-s="geo" data-n="1"><option value="1" ${s.geo?'selected':''}>On</option><option value="0" ${s.geo?'':'selected'}>Off</option></select></label>
  <div class="muted">Your phone will ask for permission the first time. The location stays on this device. You can also add or change it when editing an entry.</div>
@@ -658,6 +689,7 @@ function vSet(){if(setV==='proj')return vProj();const s=S.settings,na=S.jobs.fil
  <label>Import hours from a CSV file<input type="file" id="cf" accept=".csv,text/csv"></label>
  <label>Restore from backup<input type="file" id="rf" accept=".json,application/json"></label>
  <button class="danger" data-a="wipe" style="width:100%">Erase all data</button></div>
+ ${NA&&NA.checkUpdate?`<div class="card"><b>Android app</b><div class="muted" style="margin:4px 0 10px">Version ${esc(NA.version())}. The app looks for a new version when it opens and about once a day. Updates can't install silently: Android asks you to confirm once.</div>${UPD?`<button class="pri" style="width:100%;margin-bottom:8px" data-a="updGo">Download and install ${esc(UPD.v)}</button>`:''}<button style="width:100%" data-a="updChk">Check for updates</button></div>`:''}
  <p class="muted center">Timesheet v${VER}${NA?' · Android app '+esc(NA.version()):''}. Data is stored on this device only.</p>`}
 
 /* ---------- modals ---------- */
@@ -848,12 +880,19 @@ const A={
  saveC(v){const d={name:$('#cn').value.trim()||'Untitled client',email:$('#ce').value.trim(),phone:$('#cp').value.trim(),addr:$('#ca').value.trim(),notes:$('#co').value.trim()};
   if(v){Object.assign(cliOf(v),d);save();closeM();render()}else{const c=Object.assign({id:uid()},d);S.clients.push(c);save();closeM(()=>A.cli(c.id));render()}},
  delC(v){ask('Delete this client? Their projects and invoices are kept, just without a client.','Delete',()=>{const sn=JSON.stringify(S);S.jobs.forEach(j=>{if(j.clientId===v)j.clientId=null});S.invoices.forEach(i=>{if(i.clientId===v)i.clientId=null});S.clients=S.clients.filter(c=>c.id!==v);selC=null;save();render();offerUndo('Client deleted.',sn)})},
- start(){const jid=$('#tj').value,t=Date.now();S.lastJob=jid;S.running={jobId:jid,start:t,brkMs:0,brkStart:null,loc:null};save();render();
+ start(){const jid=$('#tj').value,t=Date.now();S.lastJob=jid;S.running={jobId:jid,start:t,brkMs:0,brkStart:null,loc:null};save();render();pushTimer();
   if(S.settings.geo)getPos().then(async p=>{p.addr=await addrFor(p);
    if(S.running&&S.running.start===t){S.running.loc=p;save();if(tab==='timer')render()}
    else{const e=S.entries.find(x=>x.start===t&&!x.loc);if(e){e.loc=p;save();if(curE===e.id&&$('#lc'))setLoc(Object.assign({},p))}}}).catch(e=>{if(e&&e.code===1)say(geoMsg(e))})},
- stop(){const r=S.running,id=uid(),n=Date.now(),bm=r.brkMs+(r.brkStart?n-r.brkStart:0);S.entries.push({id,jobId:r.jobId,start:r.start,end:n,brk:Math.round(bm/60000),note:'',tags:[],loc:r.loc||null});S.running=null;save();render();entryM(id,null,true)},
- addE(){entryM()},askOk(){const f=AK;AK=null;closeM();if(f)f()},brk(){const r=S.running,n=Date.now();if(r.brkStart){r.brkMs+=n-r.brkStart;r.brkStart=null}else r.brkStart=n;save();render()},doImp(){doImport()},rmPh(v){EP=EP.filter(x=>x!==v);pDel(v);syncP();showPh($('#ph'),EP)},addTag(v,el){const i=$('#'+el.dataset.t),c=parseTags(i.value);if(!c.includes(v))c.push(v);i.value=c.join(', ')},
+ stop(){finishTimer(Date.now())},
+ stopAt(){stopAtM()},
+ stopAtGo(){const r=S.running,t=new Date($('#sa').value).getTime();if(!r){closeM();return}
+  if(!t||t<=r.start||t>Date.now()+6e4){say('Pick a time between when it started and now.');return}
+  closeM(()=>finishTimer(Math.min(t,Date.now())))},
+ snooze(){const r=S.running;if(r){r.snz=Date.now()+72e5;save();render();pushTimer();say('OK, I will ask again in 2 hours.')}},
+ updChk(){if(NA&&NA.checkUpdate){say('Checking…');NA.checkUpdate()}},
+ updGo(){if(NA&&NA.installUpdate){say('Getting the update…');NA.installUpdate()}},
+ addE(){entryM()},askOk(){const f=AK;AK=null;closeM();if(f)f()},brk(){const r=S.running,n=Date.now();if(r.brkStart){r.brkMs+=n-r.brkStart;r.brkStart=null}else r.brkStart=n;save();render();pushTimer()},doImp(){doImport()},rmPh(v){EP=EP.filter(x=>x!==v);pDel(v);syncP();showPh($('#ph'),EP)},addTag(v,el){const i=$('#'+el.dataset.t),c=parseTags(i.value);if(!c.includes(v))c.push(v);i.value=c.join(', ')},
  clrF(){F={job:'',cl:'',tag:'',from:'',to:'',q:'',st:'all'};render()},togF(){FO=!FO;$('#fp').style.display=FO?'':'none';$('#fb').textContent=fLbl()},csvF(){dl('timesheet-filtered.csv',csv(filt(),filtX()),'text/csv')},mkInv(){mkInv()},
  openI(v){IV=JSON.parse(JSON.stringify(S.invoices.find(i=>i.id===v)));invM()},
  invMenu(v){invMenu(v)},
@@ -954,20 +993,24 @@ document.addEventListener('change',ev=>{
  if(t.dataset.f){fl(t);return}
  if(t.dataset.b){S.biz[t.dataset.b]=t.type==='number'?(parseFloat(t.value)||0):t.value;save();return}
  const k=t.dataset.s;if(!k)return;
- S.settings[k]=(t.type==='number'||t.dataset.n)?(parseFloat(t.value)||0):t.value;save();render();synSay()});
+ S.settings[k]=(t.type==='number'||t.dataset.n)?(parseFloat(t.value)||0):t.value;save();render();synSay();if(k==='warnH')pushTimer()});
 const fl=t=>{F[t.dataset.f]=t.value;const r=$('#res'),b=$('#fb');if(r)r.innerHTML=resHtml();if(b)b.textContent=fLbl()};
 document.addEventListener('input',ev=>{const t=ev.target;if(t.dataset.f)fl(t);
  else if(t.id==='pq'){PQ=t.value;$('#pl').innerHTML=projList()}
  else if(t.dataset.i!==undefined||t.id==='it')liveIV()
  // day notes are stored as they are typed, so closing the sheet any way keeps them
  else if(t.dataset.dn){const v=t.value.trim();if(v)S.dayNotes[t.dataset.dn]=v;else delete S.dayNotes[t.dataset.dn];store()}});
-let TK=0;setInterval(()=>{const c=$('#clock');if(c&&S.running){c.textContent=hms(workMs(S.running));if(++TK%30===0)$('#tstats').innerHTML=tStats()}},1000);
+let TK=0;setInterval(()=>{const c=$('#clock');if(c&&S.running){c.textContent=hms(workMs(S.running));
+ if(++TK%30===0){$('#tstats').innerHTML=tStats();if(!!stale()!==!!$('#stl')&&!$('#modal').classList.contains('open'))render()}}},1000);
+// Coming back to the app after a while: refresh the timer screen so a forgotten timer shows up straight away.
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.running&&tab==='timer'&&!$('#modal').classList.contains('open'))render()});
 // "Open in browser" links land here: ?inv=<id> reopens that invoice, ?tab=<name> picks a tab.
 const QP=new URLSearchParams(location.search),qi=QP.get('inv'),qt=QP.get('tab');
 if(TABS.some(t=>t[0]===qt))tab=qt;if(qi&&S.invoices.some(i=>i.id===qi))tab='inv';
 if(location.search)history.replaceState(null,'',location.pathname);
 if(normUnits())store();
 render();if(tab==='inv'&&qi&&S.invoices.some(i=>i.id===qi))A.openI(qi);
+pushTimer();if(NA&&NA.updateInfo){const u=NA.updateInfo();if(u)setUpd(u)}
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 </script>

@@ -3,7 +3,11 @@ package io.github.xxtragicmagicxx.timesheet;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
 import android.content.ClipData;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -13,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.util.Base64;
 import android.view.View;
 import android.view.Window;
@@ -29,6 +34,8 @@ import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -42,8 +49,11 @@ import java.io.OutputStream;
  * outside links in other apps.
  */
 public class MainActivity extends Activity {
-    private static final int RC_FILE = 1, RC_GEO = 2;
+    private static final int RC_FILE = 1, RC_GEO = 2, RC_NOTIF = 3;
     private static final String SITE = BuildConfig.SITE_URL;
+
+    /** True while the app is on screen; the daily update check only posts a notification when it is not. */
+    static boolean visible;
 
     private WebView web;
     private ValueCallback<Uri[]> fileCb;
@@ -70,6 +80,78 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         if (state == null || web.restoreState(state) == null) web.loadUrl(SITE);
+        checkNow(false);
+        scheduleDaily();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        visible = true;
+    }
+
+    @Override
+    protected void onPause() {
+        visible = false;
+        super.onPause();
+    }
+
+    /** Looks for a newer app version in the background and tells the page about it. */
+    private void checkNow(final boolean report) {
+        new Thread(() -> {
+            String state;
+            try {
+                Updater.Info i = Updater.check();
+                Updater.save(MainActivity.this, i);
+                state = i == null ? "none" : "new";
+            } catch (Exception e) {
+                state = "error";
+            }
+            final String st = state;
+            final String json = Updater.json(Updater.saved(MainActivity.this));
+            runOnUiThread(() -> {
+                if (!st.equals("error"))
+                    web.evaluateJavascript("window.onAppUpdate&&onAppUpdate(" + JSONObject.quote(json) + ")", null);
+                if (report)
+                    web.evaluateJavascript("window.onUpdateChecked&&onUpdateChecked('" + st + "')", null);
+            });
+        }).start();
+    }
+
+    private void scheduleDaily() {
+        try {
+            JobScheduler js = (JobScheduler) getSystemService(Context.JOB_SCHEDULER_SERVICE);
+            if (js == null || js.getPendingJob(1) != null) return;
+            js.schedule(new JobInfo.Builder(1, new ComponentName(this, UpdateJob.class))
+                    .setPeriodic(24L * 3600 * 1000)
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Android 13+: ask once, the first time a timer is started. If it is refused the timer works as before, minus the notifications. */
+    private void askNotifPermission() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return;
+        if (getPreferences(MODE_PRIVATE).getBoolean("askedNotif", false)) return;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("askedNotif", true).apply();
+        runOnUiThread(() -> requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, RC_NOTIF));
+    }
+
+    private void installApk(File f) {
+        Uri u = FileProvider.getUriForFile(this, getPackageName() + ".files", f);
+        Intent i = new Intent(Intent.ACTION_VIEW).setDataAndType(u, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(i);
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException e) {
+            toast("No app can open this link.");
+        }
     }
 
     @Override
@@ -212,6 +294,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int rc, String[] perms, int[] results) {
         super.onRequestPermissionsResult(rc, perms, results);
+        if (rc == RC_NOTIF) {
+            // allowed just now: show the notification for a timer that is already running
+            web.evaluateJavascript("window.pushTimer&&pushTimer()", null);
+            return;
+        }
         if (rc != RC_GEO || geoCb == null) return;
         boolean ok = false;
         for (int r : results) if (r == PackageManager.PERMISSION_GRANTED) ok = true;
@@ -231,6 +318,70 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String version() {
             return BuildConfig.VERSION_NAME;
+        }
+
+        /** The page reports the timer: {on, name, start, brkStart, brkMs, warnH, snz}. Shows or clears the notification and the "still running" alarm. */
+        @JavascriptInterface
+        public void timer(String json) {
+            try {
+                JSONObject o = new JSONObject(json);
+                if (o.optInt("on", 0) == 0) {
+                    Notif.cancelTimer(MainActivity.this);
+                    return;
+                }
+                String name = o.optString("name", "Timer");
+                long start = o.optLong("start"), bs = o.optLong("brkStart"), bm = o.optLong("brkMs"), snz = o.optLong("snz");
+                double wh = o.optDouble("warnH", 0);
+                long now = System.currentTimeMillis();
+                boolean onBreak = bs > 0;
+                long work = Math.max(0, (onBreak ? bs : now) - start - bm);
+                askNotifPermission();
+                Notif.running(MainActivity.this, name, now - work, onBreak);
+                long at = wh > 0 ? Math.max(start + (long) (wh * 3600000L), snz) : 0;
+                Notif.schedule(MainActivity.this, name, start, at);
+            } catch (Exception ignored) {
+            }
+        }
+
+        /** The update found earlier as JSON {v, cur, url}, or an empty string. */
+        @JavascriptInterface
+        public String updateInfo() {
+            return Updater.json(Updater.saved(MainActivity.this));
+        }
+
+        /** Looks again now; the page hears back through onAppUpdate / onUpdateChecked. */
+        @JavascriptInterface
+        public void checkUpdate() {
+            checkNow(true);
+        }
+
+        /**
+         * Downloads the newer APK and opens Android's installer. Installing from this app needs a one-time
+         * permission; if it is missing the settings page for it opens. If the download fails the release page opens instead.
+         */
+        @JavascriptInterface
+        public void installUpdate() {
+            final Updater.Info i = Updater.saved(MainActivity.this);
+            if (i == null) {
+                toast("No update found. Tap Check for updates.");
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                runOnUiThread(() -> {
+                    toast("Allow installs from Timesheet, then come back and tap Install again.");
+                    startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+                });
+                return;
+            }
+            new Thread(() -> {
+                try {
+                    final File f = Updater.download(i.url, outDir());
+                    runOnUiThread(() -> installApk(f));
+                } catch (Exception e) {
+                    toast("Download failed. Opening the download page.");
+                    runOnUiThread(() -> openUrl(Updater.PAGE));
+                }
+            }).start();
         }
 
         @JavascriptInterface
