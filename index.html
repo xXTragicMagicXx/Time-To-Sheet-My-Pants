@@ -146,7 +146,7 @@ input[type=file]::file-selector-button{font:inherit;color:inherit;border:1px sol
 <div id="modal"><div id="sheet"></div></div>
 <nav id="nav"></nav>
 <script>
-const VER='1.20';
+const VER='1.21';
 const KEY='timesheet_v1';
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -274,6 +274,16 @@ function finishTimer(n){const r=S.running;if(!r)return;const id=uid(),bm=Math.mi
 // Tells the Android app about the timer so it can show a notification and a "still running" alert.
 function pushTimer(){if(!NA||!NA.timer)return;const r=S.running,j=r&&jobOf(r.jobId);
  try{NA.timer(JSON.stringify(r?{on:1,name:j?j.name:'Timer',start:r.start,brkStart:r.brkStart||0,brkMs:r.brkMs||0,warnH:+S.settings.warnH||0,snz:r.snz||0}:{on:0}))}catch(e){}}
+// Break / Resume / Stop tapped in the Android notification. The app queues them with the time of the tap
+// ([{type:'brk'|'res'|'stop', t}]) and they are applied here in order; Stop then opens the entry sheet like the Stop button.
+function takeShell(){if(!NA||!NA.takeEvents)return;let ev=[];try{ev=JSON.parse(NA.takeEvents()||'[]')}catch(e){}if(!ev.length)return;
+ let stopT=0;ev.forEach(x=>{const r=S.running;if(!r||!(x.t>0))return;
+  if(x.type==='brk'&&!r.brkStart)r.brkStart=Math.max(x.t,r.start);
+  else if(x.type==='res'&&r.brkStart){r.brkMs+=Math.max(0,x.t-r.brkStart);r.brkStart=null}
+  else if(x.type==='stop')stopT=x.t});
+ if(!S.running){pushTimer();return}
+ if(stopT){tab='timer';selC=null;setV=null;finishTimer(Math.max(stopT,S.running.start+1000))}else{save();render();pushTimer()}}
+window.applyShellEvents=takeShell;
 // A newer Android app version, when the app has found one: {v: new version, cur: this version, url}.
 let UPD=null;
 function setUpd(j){try{UPD=j?JSON.parse(j):null}catch(e){UPD=null}const a=document.activeElement;
@@ -1010,7 +1020,8 @@ if(TABS.some(t=>t[0]===qt))tab=qt;if(qi&&S.invoices.some(i=>i.id===qi))tab='inv'
 if(location.search)history.replaceState(null,'',location.pathname);
 if(normUnits())store();
 render();if(tab==='inv'&&qi&&S.invoices.some(i=>i.id===qi))A.openI(qi);
-pushTimer();if(NA&&NA.updateInfo){const u=NA.updateInfo();if(u)setUpd(u)}
+takeShell();pushTimer();if(NA&&NA.updateInfo){const u=NA.updateInfo();if(u)setUpd(u)}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)takeShell()});
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
 if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 </script>
