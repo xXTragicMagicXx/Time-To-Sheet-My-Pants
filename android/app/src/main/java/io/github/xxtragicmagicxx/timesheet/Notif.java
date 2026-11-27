@@ -39,7 +39,22 @@ final class Notif {
         return PendingIntent.getActivity(c, 0, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
-    /** Ongoing notification with a chronometer that shows the work time so far; a plain "On break" while on break. */
+    private static PendingIntent act(Context c, String action) {
+        Intent i = new Intent(c, ActionReceiver.class).setAction(action);
+        return PendingIntent.getBroadcast(c, action.hashCode(), i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    /** Stop opens the app, which stops the timer at the moment of the tap and shows the entry details sheet. */
+    private static PendingIntent stop(Context c) {
+        Intent i = new Intent(c, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(MainActivity.EXTRA_SHELL, "stop");
+        return PendingIntent.getActivity(c, 2, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    /**
+     * Ongoing notification with a chronometer of the work time so far and Break / Stop buttons;
+     * while on break it shows the time worked and Resume / Stop.
+     */
     static void running(Context c, String name, long whenMs, boolean onBreak) {
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, CH_RUN)
                 .setSmallIcon(R.drawable.ic_stat)
@@ -48,8 +63,15 @@ final class Notif {
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(open(c));
-        if (onBreak) b.setContentText("On break").setShowWhen(false);
-        else b.setContentText("Timer running").setUsesChronometer(true).setWhen(whenMs).setShowWhen(true);
+        if (onBreak) {
+            long m = Math.max(0, System.currentTimeMillis() - whenMs) / 60000;
+            b.setContentText("On break (" + (m / 60) + ":" + (m % 60 < 10 ? "0" : "") + (m % 60) + " worked)").setShowWhen(false)
+                    .addAction(R.drawable.ic_stat, "Resume", act(c, ActionReceiver.RES));
+        } else {
+            b.setContentText("Timer running").setUsesChronometer(true).setWhen(whenMs).setShowWhen(true)
+                    .addAction(R.drawable.ic_stat, "Break", act(c, ActionReceiver.BRK));
+        }
+        b.addAction(R.drawable.ic_stat, "Stop", stop(c));
         nm(c).notify(ID_RUN, b.build());
     }
 
@@ -64,7 +86,8 @@ final class Notif {
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
-                .setContentIntent(open(c));
+                .setContentIntent(open(c))
+                .addAction(R.drawable.ic_stat, "Stop", stop(c));
         nm(c).notify(ID_ALERT, b.build());
     }
 

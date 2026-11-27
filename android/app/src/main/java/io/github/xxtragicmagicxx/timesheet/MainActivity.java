@@ -37,6 +37,7 @@ import androidx.core.content.FileProvider;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.lang.ref.WeakReference;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -54,6 +55,9 @@ public class MainActivity extends Activity {
 
     /** True while the app is on screen; the daily update check only posts a notification when it is not. */
     static boolean visible;
+    /** Intent extra set by the notification's Stop button. */
+    static final String EXTRA_SHELL = "shell";
+    private static WeakReference<MainActivity> live;
 
     private WebView web;
     private ValueCallback<Uri[]> fileCb;
@@ -80,6 +84,8 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         if (state == null || web.restoreState(state) == null) web.loadUrl(SITE);
+        live = new WeakReference<>(this);
+        if (state == null) handleShell(getIntent());
         checkNow(false);
         scheduleDaily();
     }
@@ -94,6 +100,34 @@ public class MainActivity extends Activity {
     protected void onPause() {
         visible = false;
         super.onPause();
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        handleShell(i);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (live != null && live.get() == this) live = null;
+        super.onDestroy();
+    }
+
+    /** Stop tapped in the notification: queue it with the time of the tap; the page stops the timer and opens the entry sheet. */
+    private void handleShell(Intent i) {
+        if (i == null || !"stop".equals(i.getStringExtra(EXTRA_SHELL))) return;
+        i.removeExtra(EXTRA_SHELL);
+        TimerState.event(this, "stop", System.currentTimeMillis());
+        poke();
+    }
+
+    /** Asks the open page, if there is one, to apply the queued notification taps now. */
+    static void poke() {
+        final MainActivity a = live == null ? null : live.get();
+        if (a == null || a.web == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.applyShellEvents&&applyShellEvents()", null));
     }
 
     /** Looks for a newer app version in the background and tells the page about it. */
@@ -325,22 +359,17 @@ public class MainActivity extends Activity {
         public void timer(String json) {
             try {
                 JSONObject o = new JSONObject(json);
-                if (o.optInt("on", 0) == 0) {
-                    Notif.cancelTimer(MainActivity.this);
-                    return;
-                }
-                String name = o.optString("name", "Timer");
-                long start = o.optLong("start"), bs = o.optLong("brkStart"), bm = o.optLong("brkMs"), snz = o.optLong("snz");
-                double wh = o.optDouble("warnH", 0);
-                long now = System.currentTimeMillis();
-                boolean onBreak = bs > 0;
-                long work = Math.max(0, (onBreak ? bs : now) - start - bm);
-                askNotifPermission();
-                Notif.running(MainActivity.this, name, now - work, onBreak);
-                long at = wh > 0 ? Math.max(start + (long) (wh * 3600000L), snz) : 0;
-                Notif.schedule(MainActivity.this, name, start, at);
+                TimerState.save(MainActivity.this, o);
+                if (o.optInt("on", 0) != 0) askNotifPermission();
+                TimerState.show(MainActivity.this, o);
             } catch (Exception ignored) {
             }
+        }
+
+        /** Break / Resume / Stop taps from the notification that the page has not applied yet, as a JSON array; empties the queue. */
+        @JavascriptInterface
+        public String takeEvents() {
+            return TimerState.take(MainActivity.this);
         }
 
         /** The update found earlier as JSON {v, cur, url}, or an empty string. */
